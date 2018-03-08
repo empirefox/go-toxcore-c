@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/TokTok/go-toxcore-c"
+	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 func init() {
@@ -21,7 +22,7 @@ var server = []interface{}{
 	"205.185.116.116", uint16(33445), "A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702",
 }
 var fname = "./toxecho.data"
-var debug = false
+var debug = true
 var nickPrefix = "EchoBot."
 var statusText = "Send me text, file, audio, video."
 
@@ -38,19 +39,23 @@ func main() {
 	}
 	opt.Tcp_port = 33445
 	var t *tox.Tox
+	var err error
 	for i := 0; i < 5; i++ {
-		t = tox.NewTox(opt)
-		if t == nil {
+		t, err = tox.NewTox(opt)
+		if err != nil {
 			opt.Tcp_port += 1
 		} else {
 			break
 		}
 	}
 
-	r, err := t.Bootstrap(server[0].(string), server[1].(uint16), server[2].(string))
-	r2, err := t.AddTcpRelay(server[0].(string), server[1].(uint16), server[2].(string))
-	if debug {
-		log.Println("bootstrap:", r, err, r2)
+	err = t.Bootstrap(server[0].(string), server[1].(uint16), server[2].(string))
+	if debug && err != nil {
+		log.Println("Bootstrap:", err)
+	}
+	err = t.AddTcpRelay(server[0].(string), server[1].(uint16), server[2].(string))
+	if debug && err != nil {
+		log.Println("AddTcpRelay:", err)
 	}
 
 	pubkey := t.SelfGetPublicKey()
@@ -71,12 +76,12 @@ func main() {
 		log.Println(humanName, defaultName, err)
 	}
 
-	defaultStatusText, err := t.SelfGetStatusMessage()
+	defaultStatusText := t.SelfGetStatusMessage()
 	if defaultStatusText != statusText {
 		t.SelfSetStatusMessage(statusText)
 	}
 	if debug {
-		log.Println(statusText, defaultStatusText, err)
+		log.Println(statusText, defaultStatusText)
 	}
 
 	sz := t.GetSavedataSize()
@@ -105,7 +110,7 @@ func main() {
 	}
 
 	// callbacks
-	t.CallbackSelfConnectionStatus(func(t *tox.Tox, status int, userData interface{}) {
+	t.CallbackSelfConnectionStatus(func(t *tox.Tox, status toxenums.TOX_CONNECTION, userData interface{}) {
 		if debug {
 			log.Println("on self conn status:", status, userData)
 		}
@@ -129,13 +134,13 @@ func main() {
 			log.Println(n, err)
 		}
 	}, nil)
-	t.CallbackFriendConnectionStatus(func(t *tox.Tox, friendNumber uint32, status int, userData interface{}) {
+	t.CallbackFriendConnectionStatus(func(t *tox.Tox, friendNumber uint32, status toxenums.TOX_CONNECTION, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
 			log.Println("on friend connection status:", friendNumber, status, friendId, err)
 		}
 	}, nil)
-	t.CallbackFriendStatus(func(t *tox.Tox, friendNumber uint32, status int, userData interface{}) {
+	t.CallbackFriendStatus(func(t *tox.Tox, friendNumber uint32, status toxenums.TOX_USER_STATUS, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
 			log.Println("on friend status:", friendNumber, status, friendId, err)
@@ -161,11 +166,11 @@ func main() {
 			if err != nil {
 			}
 			if data, ok := sendDatas[reqkey]; ok {
-				r, err := t.FileSendChunk(friendNumber, fileNumber, pos, data)
+				err = t.FileSendChunk(friendNumber, fileNumber, pos, data)
 				if err != nil {
 					if err.Error() == "toxcore error: 7" || err.Error() == "toxcore error: 8" {
 					} else {
-						log.Println("file send chunk error:", err, r, reqkey)
+						log.Println("file send chunk error:", err, reqkey)
 					}
 					break
 				} else {
@@ -186,23 +191,23 @@ func main() {
 	}
 
 	t.CallbackFileRecvControl(func(t *tox.Tox, friendNumber uint32, fileNumber uint32,
-		control int, userData interface{}) {
+		control toxenums.TOX_FILE_CONTROL, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
 			log.Println("on recv file control:", friendNumber, fileNumber, control, friendId, err)
 		}
 		key := uint64(uint64(friendNumber)<<32 | uint64(fileNumber))
-		if control == tox.FILE_CONTROL_RESUME {
+		if control == toxenums.TOX_FILE_CONTROL_RESUME {
 			if fno, ok := sendFiles[key]; ok {
-				t.FileControl(friendNumber, fno, tox.FILE_CONTROL_RESUME)
+				t.FileControl(friendNumber, fno, toxenums.TOX_FILE_CONTROL_RESUME)
 			}
-		} else if control == tox.FILE_CONTROL_PAUSE {
+		} else if control == toxenums.TOX_FILE_CONTROL_PAUSE {
 			if fno, ok := sendFiles[key]; ok {
-				t.FileControl(friendNumber, fno, tox.FILE_CONTROL_PAUSE)
+				t.FileControl(friendNumber, fno, toxenums.TOX_FILE_CONTROL_PAUSE)
 			}
-		} else if control == tox.FILE_CONTROL_CANCEL {
+		} else if control == toxenums.TOX_FILE_CONTROL_CANCEL {
 			if fno, ok := sendFiles[key]; ok {
-				t.FileControl(friendNumber, fno, tox.FILE_CONTROL_CANCEL)
+				t.FileControl(friendNumber, fno, toxenums.TOX_FILE_CONTROL_CANCEL)
 			}
 		}
 	}, nil)
@@ -272,12 +277,12 @@ func main() {
 		}
 		var audioBitRate uint32 = 48
 		var videoBitRate uint32 = 64
-		r, err := av.Answer(friendNumber, audioBitRate, videoBitRate)
+		err := av.Answer(friendNumber, audioBitRate, videoBitRate)
 		if err != nil {
-			log.Println(err, r)
+			log.Println(err)
 		}
 	}, nil)
-	av.CallbackCallState(func(av *tox.ToxAV, friendNumber uint32, state uint32, userData interface{}) {
+	av.CallbackCallState(func(av *tox.ToxAV, friendNumber uint32, state toxenums.TOXAV_FRIEND_CALL_STATE, userData interface{}) {
 		if debug {
 			log.Println("on call state:", friendNumber, state)
 		}
@@ -289,9 +294,9 @@ func main() {
 				log.Println("on recv audio frame:", friendNumber, len(pcm), sampleCount, channels, samplingRate)
 			}
 		}
-		r, err := av.AudioSendFrame(friendNumber, pcm, sampleCount, channels, samplingRate)
+		err := av.AudioSendFrame(friendNumber, pcm, sampleCount, channels, samplingRate)
 		if err != nil {
-			log.Println(err, r)
+			log.Println(err)
 		}
 	}, nil)
 	av.CallbackVideoReceiveFrame(func(av *tox.ToxAV, friendNumber uint32, width uint16, height uint16,
@@ -301,9 +306,9 @@ func main() {
 				log.Println("on recv video frame:", friendNumber, width, height, len(frames))
 			}
 		}
-		r, err := av.VideoSendFrame(friendNumber, width, height, frames)
+		err := av.VideoSendFrame(friendNumber, width, height, frames)
 		if err != nil {
-			log.Println(err, r)
+			log.Println(err)
 		}
 	}, nil)
 
@@ -367,9 +372,4 @@ func main() {
 
 func makekey(no uint32, a0 interface{}, a1 interface{}) string {
 	return fmt.Sprintf("%d_%v_%v", no, a0, a1)
-}
-
-func _dirty_init() {
-	log.Println("ddddddddd")
-	tox.KeepPkg()
 }

@@ -9,35 +9,19 @@ extern void toxCallbackLog(Tox*, TOX_LOG_LEVEL, char*, uint32_t, char*, char*);
 
 */
 import "C"
-import "unsafe"
+import (
+	"unsafe"
 
-const (
-	SAVEDATA_TYPE_NONE       = int(C.TOX_SAVEDATA_TYPE_NONE)
-	SAVEDATA_TYPE_TOX_SAVE   = int(C.TOX_SAVEDATA_TYPE_TOX_SAVE)
-	SAVEDATA_TYPE_SECRET_KEY = int(C.TOX_SAVEDATA_TYPE_SECRET_KEY)
-)
-
-const (
-	PROXY_TYPE_NONE   = int(C.TOX_PROXY_TYPE_NONE)
-	PROXY_TYPE_HTTP   = int(C.TOX_PROXY_TYPE_HTTP)
-	PROXY_TYPE_SOCKS5 = int(C.TOX_PROXY_TYPE_SOCKS5)
-)
-
-const (
-	LOG_LEVEL_TRACE   = int(C.TOX_LOG_LEVEL_TRACE)
-	LOG_LEVEL_DEBUG   = int(C.TOX_LOG_LEVEL_DEBUG)
-	LOG_LEVEL_INFO    = int(C.TOX_LOG_LEVEL_INFO)
-	LOG_LEVEL_WARNING = int(C.TOX_LOG_LEVEL_WARNING)
-	LOG_LEVEL_ERROR   = int(C.TOX_LOG_LEVEL_ERROR)
+	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 type ToxOptions struct {
 	Ipv6_enabled            bool
 	Udp_enabled             bool
-	Proxy_type              int32
+	Proxy_type              toxenums.TOX_PROXY_TYPE
 	Proxy_host              string
 	Proxy_port              uint16
-	Savedata_type           int
+	Savedata_type           toxenums.TOX_SAVEDATA_TYPE
 	Savedata_data           []byte
 	Tcp_port                uint16
 	Local_discovery_enabled bool
@@ -45,7 +29,7 @@ type ToxOptions struct {
 	End_port                uint16
 	Hole_punching_enabled   bool
 	ThreadSafe              bool
-	LogCallback             func(_ *Tox, level int, file string, line uint32, fname string, msg string)
+	LogCallback             func(_ *Tox, level toxenums.TOX_LOG_LEVEL, file string, line uint32, fname string, msg string)
 }
 
 func NewToxOptions() *ToxOptions {
@@ -55,7 +39,7 @@ func NewToxOptions() *ToxOptions {
 	opts := new(ToxOptions)
 	opts.Ipv6_enabled = bool(C.tox_options_get_ipv6_enabled(toxopts))
 	opts.Udp_enabled = bool(C.tox_options_get_udp_enabled(toxopts))
-	opts.Proxy_type = int32(C.tox_options_get_proxy_type(toxopts))
+	opts.Proxy_type = toxenums.TOX_PROXY_TYPE(C.tox_options_get_proxy_type(toxopts))
 	opts.Proxy_port = uint16(C.tox_options_get_proxy_port(toxopts))
 	opts.Tcp_port = uint16(C.tox_options_get_tcp_port(toxopts))
 	opts.Local_discovery_enabled = bool(C.tox_options_get_local_discovery_enabled(toxopts))
@@ -98,7 +82,7 @@ func (this *ToxOptions) toCToxOptions() *C.struct_Tox_Options {
 func toxCallbackLog(ctox *C.Tox, level C.TOX_LOG_LEVEL, file *C.char, line C.uint32_t, fname *C.char, msg *C.char) {
 	t := cbUserDatas.get(ctox)
 	if t != nil && t.opts != nil && t.opts.LogCallback != nil {
-		t.opts.LogCallback(t, int(level), C.GoString(file), uint32(line), C.GoString(fname), C.GoString(msg))
+		t.opts.LogCallback(t, toxenums.TOX_LOG_LEVEL(level), C.GoString(file), uint32(line), C.GoString(fname), C.GoString(msg))
 	}
 }
 

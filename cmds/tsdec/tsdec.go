@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	log.SetFlags(log.Flags() ^ log.Ldate ^ log.Ltime)
+	log.SetFlags(log.Flags() ^ log.Ldate ^ log.Ltime | log.Lshortfile)
 }
 
 var tsfile string = "tox_save.tox"
@@ -28,18 +28,14 @@ func printHelp() {
 }
 
 func main() {
-	// flag.StringVar(&tsfile, "tsfile", "", "tox save data file")
+	flag.StringVar(&tsfile, "tsfile", tsfile, "tox save data file")
 	flag.StringVar(&pass, "pass", pass, "tox save data password")
 	flag.StringVar(&tofile, "tofile", tofile, "result file")
 
 	flag.Parse()
-	// log.Println(flag.Args())
-	if len(flag.Args()) < 1 {
-		printHelp()
-		flag.Usage()
-		return
-	}
-	tsfile = flag.Arg(0)
+
+	log.Println(tsfile)
+	log.Println(pass)
 
 	data, err := ioutil.ReadFile(tsfile)
 	if err != nil {
@@ -56,16 +52,16 @@ func main() {
 	}
 
 	if isencrypt {
-		ok, err, salt := tox.GetSalt(data)
+		salt, err := tox.GetSalt(data)
 		if err != nil {
-			log.Println(ok, err, len(salt), salt)
+			log.Println(err, len(salt), salt)
 		}
 		pkey, err := tox.DeriveWithSalt([]byte(pass), salt)
 		defer pkey.Free()
 		if err != nil {
 			log.Println(err)
 		}
-		ok, err, datad := pkey.Decrypt(data)
+		datad, err := pkey.Decrypt(data)
 		if err != nil {
 			// log.Println(ok, err, len(datad), datad[0:32])
 			log.Println("Decrypt error, check your -pass:", err)
@@ -78,12 +74,16 @@ func main() {
 	opts := tox.NewToxOptions()
 	opts.Savedata_type = tox.SAVEDATA_TYPE_TOX_SAVE
 	opts.Savedata_data = data
-	t := tox.NewTox(opts)
+	t, err := tox.NewTox(opts)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 	fnums := t.SelfGetFriendList()
 	log.Println(fnums, t)
 	log.Println("Self Name:", t.SelfGetName())
 	log.Println("Self ID:", t.SelfGetAddress())
-	mystmsg, err := t.SelfGetStatusMessage()
+	mystmsg := t.SelfGetStatusMessage()
 	log.Println("Status:", mystmsg)
 	log.Println("------------------------------------------")
 	log.Println("Friend Count:", len(fnums))
@@ -103,24 +103,13 @@ func main() {
 		}
 	} else { // do encrypt
 		log.Println("Encrypting...")
-
-		// first time, there is no salt
-		salt := make([]byte, tox.PASS_KEY_LENGTH)
-		_, err, salt := tox.GetSalt(data)
-		if err != nil {
-			log.Println(err, "GetSalt")
-			// return
-		}
-		_ = salt
-
-		// pakey, err = tox.DeriveWithSalt([]byte(pass), salt)
 		pakey, err := tox.Derive([]byte(pass))
 		defer pakey.Free()
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		_, err, encdata := pakey.Encrypt(data)
+		encdata, err := pakey.Encrypt(data)
 		if err != nil {
 			log.Println(err)
 			return

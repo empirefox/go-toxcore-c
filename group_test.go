@@ -4,6 +4,8 @@ import (
 	"log"
 	"testing"
 	"time"
+
+	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 // issue #6
@@ -11,7 +13,7 @@ func TestIssue6(t *testing.T) {
 	opts := NewToxOptions()
 	opts.ThreadSafe = true
 	opts.Tcp_port = 34567
-	_t1 := NewTox(opts)
+	_t1, _ := NewTox(opts)
 	log.Println(_t1)
 	go func() {
 		for {
@@ -23,9 +25,9 @@ func TestIssue6(t *testing.T) {
 	opts2 := NewToxOptions()
 	opts2.ThreadSafe = true
 	opts2.Tcp_port = 34568
-	_t2 := NewTox(opts2)
+	_t2, _ := NewTox(opts2)
 	log.Println(_t2)
-	_t2.CallbackGroupInviteAdd(func(_ *Tox, friendNumber uint32, itype uint8, data string, userData interface{}) {
+	_t2.CallbackConferenceInviteAdd(func(_ *Tox, friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, data string, userData interface{}) {
 		log.Println(friendNumber, itype)
 	}, nil)
 	go func() {
@@ -35,8 +37,8 @@ func TestIssue6(t *testing.T) {
 		}
 	}()
 
-	waitcond(func() bool { return _t1.IsConnected() > 0 }, 100)
-	waitcond(func() bool { return _t2.IsConnected() > 0 }, 100)
+	waitcond(func() bool { return _t1.SelfGetConnectionStatus() > 0 }, 100)
+	waitcond(func() bool { return _t2.SelfGetConnectionStatus() > 0 }, 100)
 	log.Println("both connected")
 
 	gid := _t1.AddAVGroupChat()
@@ -44,5 +46,5 @@ func TestIssue6(t *testing.T) {
 	// log.Println(ok, err)
 	log.Println(gid)
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(50 * time.Second)
 }

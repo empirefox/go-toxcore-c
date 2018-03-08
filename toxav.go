@@ -63,11 +63,14 @@ import "C"
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"unsafe"
+
+	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 type cb_call_ftype func(this *ToxAV, friendNumber uint32, audioEnabled bool, videoEnabled bool, userData interface{})
-type cb_call_state_ftype func(this *ToxAV, friendNumber uint32, state uint32, userData interface{})
+type cb_call_state_ftype func(this *ToxAV, friendNumber uint32, state toxenums.TOXAV_FRIEND_CALL_STATE, userData interface{})
 type cb_audio_bit_rate_ftype func(this *ToxAV, friendNumber uint32, audioBitRate uint32, userData interface{})
 type cb_video_bit_rate_ftype func(this *ToxAV, friendNumber uint32, videoBitRate uint32, userData interface{})
 type cb_audio_receive_frame_ftype func(this *ToxAV, friendNumber uint32, pcm []byte, sampleCount int, channels int, samplingRate int, userData interface{})
@@ -102,7 +105,7 @@ type ToxAV struct {
 
 func NewToxAV(tox *Tox) (*ToxAV, error) {
 	if tox == nil {
-		return nil, toxerr("tox can not nil")
+		return nil, fmt.Errorf("tox can not nil")
 	}
 
 	tav := new(ToxAV)
@@ -111,7 +114,7 @@ func NewToxAV(tox *Tox) (*ToxAV, error) {
 	var cerr C.TOXAV_ERR_NEW
 	tav.toxav = C.toxav_new(tox.toxcore, &cerr)
 	if cerr != 0 {
-		return nil, toxerr(cerr)
+		return nil, toxenums.TOXAV_ERR_NEW(cerr)
 	}
 
 	cbAVUserDatas.set(tav.toxav, tav)
@@ -134,13 +137,13 @@ func (this *ToxAV) Iterate() {
 	C.toxav_iterate(this.toxav)
 }
 
-func (this *ToxAV) Call(friendNumber uint32, audioBitRate uint32, videoBitRate uint32) (bool, error) {
+func (this *ToxAV) Call(friendNumber uint32, audioBitRate uint32, videoBitRate uint32) error {
 	var cerr C.TOXAV_ERR_CALL
-	r := C.toxav_call(this.toxav, C.uint32_t(friendNumber), C.uint32_t(audioBitRate), C.uint32_t(videoBitRate), &cerr)
+	C.toxav_call(this.toxav, C.uint32_t(friendNumber), C.uint32_t(audioBitRate), C.uint32_t(videoBitRate), &cerr)
 	if cerr != 0 {
-		return bool(r), toxerr(cerr)
+		return toxenums.TOXAV_ERR_CALL(cerr)
 	}
-	return bool(r), nil
+	return nil
 }
 
 var cbAVUserDatas = newUserDataAV()
@@ -164,21 +167,20 @@ func (this *ToxAV) CallbackCall(cbfn cb_call_ftype, userData interface{}) {
 	C.cb_call_wrapper_for_go(this.toxav, _cbfn, _userData)
 }
 
-func (this *ToxAV) Answer(friendNumber uint32, audioBitRate uint32, videoBitRate uint32) (bool, error) {
+func (this *ToxAV) Answer(friendNumber uint32, audioBitRate uint32, videoBitRate uint32) error {
 	var cerr C.TOXAV_ERR_ANSWER
-	r := C.toxav_answer(this.toxav, C.uint32_t(friendNumber), C.uint32_t(audioBitRate), C.uint32_t(videoBitRate), &cerr)
-	if cerr != C.TOXAV_ERR_ANSWER_OK {
-		return false, toxerr(cerr)
+	C.toxav_answer(this.toxav, C.uint32_t(friendNumber), C.uint32_t(audioBitRate), C.uint32_t(videoBitRate), &cerr)
+	if cerr != 0 {
+		return toxenums.TOXAV_ERR_ANSWER(cerr)
 	}
-
-	return bool(r), nil
+	return nil
 }
 
 //export callbackCallStateWrapperForC
 func callbackCallStateWrapperForC(m *C.ToxAV, friendNumber C.uint32_t, state C.uint32_t, a3 unsafe.Pointer) {
 	var this = cbAVUserDatas.get(m)
 	if this.cb_call_state != nil {
-		this.cb_call_state(this, uint32(friendNumber), uint32(state), this.cb_call_state_user_data)
+		this.cb_call_state(this, uint32(friendNumber), toxenums.TOXAV_FRIEND_CALL_STATE(state), this.cb_call_state_user_data)
 	}
 }
 
@@ -193,31 +195,31 @@ func (this *ToxAV) CallbackCallState(cbfn cb_call_state_ftype, userData interfac
 	C.cb_call_state_wrapper_for_go(this.toxav, _cbfn, _userData)
 }
 
-func (this *ToxAV) CallControl(friendNumber uint32, control int) (bool, error) {
+func (this *ToxAV) CallControl(friendNumber uint32, control int) error {
 	var cerr C.TOXAV_ERR_CALL_CONTROL
-	r := C.toxav_call_control(this.toxav, C.uint32_t(friendNumber), C.TOXAV_CALL_CONTROL(control), &cerr)
-	if cerr != C.TOXAV_ERR_CALL_CONTROL_OK {
-		return bool(r), toxerr(cerr)
+	C.toxav_call_control(this.toxav, C.uint32_t(friendNumber), C.TOXAV_CALL_CONTROL(control), &cerr)
+	if cerr != 0 {
+		return toxenums.TOXAV_ERR_CALL_CONTROL(cerr)
 	}
-	return bool(r), nil
+	return nil
 }
 
-func (this *ToxAV) AudioSetBitRate(friendNumber uint32, audioBitRate uint32) (bool, error) {
+func (this *ToxAV) AudioSetBitRate(friendNumber uint32, audioBitRate uint32) error {
 	var cerr C.TOXAV_ERR_BIT_RATE_SET
-	r := C.toxav_audio_set_bit_rate(this.toxav, C.uint32_t(friendNumber), C.uint32_t(audioBitRate), &cerr)
-	if cerr != C.TOXAV_ERR_BIT_RATE_SET_OK {
-		return bool(r), toxerr(cerr)
+	C.toxav_audio_set_bit_rate(this.toxav, C.uint32_t(friendNumber), C.uint32_t(audioBitRate), &cerr)
+	if cerr != 0 {
+		return toxenums.TOXAV_ERR_BIT_RATE_SET(cerr)
 	}
-	return bool(r), nil
+	return nil
 }
 
-func (this *ToxAV) VideoSetBitRate(friendNumber uint32, videoBitRate uint32) (bool, error) {
+func (this *ToxAV) VideoSetBitRate(friendNumber uint32, videoBitRate uint32) error {
 	var cerr C.TOXAV_ERR_BIT_RATE_SET
-	r := C.toxav_video_set_bit_rate(this.toxav, C.uint32_t(friendNumber), C.uint32_t(videoBitRate), &cerr)
-	if cerr != C.TOXAV_ERR_BIT_RATE_SET_OK {
-		return bool(r), toxerr(cerr)
+	C.toxav_video_set_bit_rate(this.toxav, C.uint32_t(friendNumber), C.uint32_t(videoBitRate), &cerr)
+	if cerr != 0 {
+		return toxenums.TOXAV_ERR_BIT_RATE_SET(cerr)
 	}
-	return bool(r), nil
+	return nil
 }
 
 //export callbackAudioBitRateWrapperForC
@@ -258,17 +260,17 @@ func (this *ToxAV) CallbackVideoBitRate(cbfn cb_video_bit_rate_ftype, userData i
 	C.cb_video_bit_rate_wrapper_for_go(this.toxav, _cbfn, _userData)
 }
 
-func (this *ToxAV) AudioSendFrame(friendNumber uint32, pcm []byte, sampleCount int, channels int, samplingRate int) (bool, error) {
+func (this *ToxAV) AudioSendFrame(friendNumber uint32, pcm []byte, sampleCount int, channels int, samplingRate int) error {
 	pcm_ := (*C.int16_t)(unsafe.Pointer(&pcm[0]))
 	var cerr C.TOXAV_ERR_SEND_FRAME
-	r := C.toxav_audio_send_frame(this.toxav, C.uint32_t(friendNumber), pcm_, C.size_t(sampleCount), C.uint8_t(channels), C.uint32_t(samplingRate), &cerr)
-	if cerr != C.TOXAV_ERR_SEND_FRAME_OK {
-		return false, toxerr(cerr)
+	C.toxav_audio_send_frame(this.toxav, C.uint32_t(friendNumber), pcm_, C.size_t(sampleCount), C.uint8_t(channels), C.uint32_t(samplingRate), &cerr)
+	if cerr != 0 {
+		return toxenums.TOXAV_ERR_SEND_FRAME(cerr)
 	}
-	return bool(r), nil
+	return nil
 }
 
-func (this *ToxAV) VideoSendFrame(friendNumber uint32, width uint16, height uint16, data []byte) (bool, error) {
+func (this *ToxAV) VideoSendFrame(friendNumber uint32, width uint16, height uint16, data []byte) error {
 	if this.in_image != nil && (uint16(this.in_width) != width || uint16(this.in_height) != height) {
 		C.vpx_img_free(this.in_image)
 		this.in_image = nil
@@ -283,15 +285,15 @@ func (this *ToxAV) VideoSendFrame(friendNumber uint32, width uint16, height uint
 	C.rgb_to_i420((*C.uchar)(unsafe.Pointer(&data[0])), this.in_image)
 
 	var cerr C.TOXAV_ERR_SEND_FRAME
-	r := C.toxav_video_send_frame(this.toxav, C.uint32_t(friendNumber), C.uint16_t(width), C.uint16_t(height),
+	C.toxav_video_send_frame(this.toxav, C.uint32_t(friendNumber), C.uint16_t(width), C.uint16_t(height),
 		(*C.uint8_t)(this.in_image.planes[0]),
 		(*C.uint8_t)(this.in_image.planes[1]),
 		(*C.uint8_t)(this.in_image.planes[2]),
 		&cerr)
-	if cerr != C.TOXAV_ERR_SEND_FRAME_OK {
-		return false, toxerr(cerr)
+	if cerr != 0 {
+		return toxenums.TOXAV_ERR_SEND_FRAME(cerr)
 	}
-	return bool(r), nil
+	return nil
 }
 
 //export callbackAudioReceiveFrameWrapperForC
@@ -376,10 +378,6 @@ func (this *Tox) JoinAVGroupChat(friendNumber uint32, cookie string) (int, error
 	r := C.toxav_join_av_groupchat(this.toxcore, _fn, _data, _length, nil, nil)
 	if int(r) == -1 {
 		return int(r), errors.New("Join av group chat failed")
-	}
-
-	if this.hooks.ConferenceJoin != nil {
-		this.hooks.ConferenceJoin(friendNumber, uint32(r), cookie)
 	}
 	return int(r), nil
 }

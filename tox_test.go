@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 // `go test -v -run Covers` will show untested functions
@@ -30,7 +32,7 @@ func init() {
 
 func TestCreate(t *testing.T) {
 	t.Run("no options", func(t *testing.T) {
-		_t := NewTox(nil)
+		_t, _ := NewTox(nil)
 		if _t == nil {
 			t.Error("nil")
 		}
@@ -38,7 +40,7 @@ func TestCreate(t *testing.T) {
 	})
 	t.Run("default options", func(t *testing.T) {
 		opts := NewToxOptions()
-		_t := NewTox(opts)
+		_t, _ := NewTox(opts)
 		if _t == nil {
 			t.Error("nil")
 		}
@@ -47,7 +49,7 @@ func TestCreate(t *testing.T) {
 	t.Run("tcp options", func(t *testing.T) {
 		opts := NewToxOptions()
 		opts.Tcp_port = 44577
-		_t := NewTox(opts)
+		_t, _ := NewTox(opts)
 		if _t == nil {
 			t.Error("nil")
 		}
@@ -56,7 +58,8 @@ func TestCreate(t *testing.T) {
 	t.Run("tcp conflict", func(t *testing.T) {
 		opts := NewToxOptions()
 		opts.Tcp_port = 44587
-		_t, _t2 := NewTox(opts), NewTox(opts)
+		_t, _ := NewTox(opts)
+		_t2, _ := NewTox(opts)
 		if _t == nil || _t2 != nil {
 			t.Error("should non-nil/nil", _t, _t2)
 		}
@@ -64,7 +67,7 @@ func TestCreate(t *testing.T) {
 		_t2.Kill()
 	})
 	t.Run("save profile", func(t *testing.T) {
-		_t := NewTox(nil)
+		_t, _ := NewTox(nil)
 		sz := _t.GetSavedataSize()
 		dat := _t.GetSavedata()
 		if sz <= 0 || dat == nil || len(dat) != int(sz) {
@@ -73,14 +76,14 @@ func TestCreate(t *testing.T) {
 		_t.Kill()
 	})
 	t.Run("load profile", func(t *testing.T) {
-		_t := NewTox(nil)
+		_t, _ := NewTox(nil)
 		dat := _t.GetSavedata()
 		_t.Kill()
 
 		opts := NewToxOptions()
 		opts.Savedata_data = dat
-		opts.Savedata_type = SAVEDATA_TYPE_TOX_SAVE
-		_t2 := NewTox(opts)
+		opts.Savedata_type = toxenums.TOX_SAVEDATA_TYPE_TOX_SAVE
+		_t2, _ := NewTox(opts)
 		dat2 := _t2.GetSavedata()
 		if len(dat2) != len(dat) || string(dat2) != string(dat) {
 			t.Error("must ==")
@@ -88,15 +91,15 @@ func TestCreate(t *testing.T) {
 		_t2.Kill()
 	})
 	t.Run("load error profile", func(t *testing.T) {
-		_t := NewTox(nil)
+		_t, _ := NewTox(nil)
 		dat := _t.GetSavedata()
 		addr := _t.SelfGetAddress()
 		_t.Kill()
 
 		opts := NewToxOptions()
 		opts.Savedata_data = append([]byte("set-broken"), dat...)
-		opts.Savedata_type = SAVEDATA_TYPE_TOX_SAVE
-		_t2 := NewTox(opts)
+		opts.Savedata_type = toxenums.TOX_SAVEDATA_TYPE_TOX_SAVE
+		_t2, _ := NewTox(opts)
 		if _t2 == nil {
 			t.Error("must non-nil")
 		}
@@ -106,16 +109,16 @@ func TestCreate(t *testing.T) {
 		_t2.Kill()
 	})
 	t.Run("load seckey", func(t *testing.T) {
-		_t := NewTox(nil)
+		_t, _ := NewTox(nil)
 		addr := _t.SelfGetAddress()
 		seckey := _t.SelfGetSecretKey()
 		_t.Kill()
 
 		opts := NewToxOptions()
-		opts.Savedata_type = SAVEDATA_TYPE_SECRET_KEY
+		opts.Savedata_type = toxenums.TOX_SAVEDATA_TYPE_SECRET_KEY
 		binsk, _ := hex.DecodeString(seckey)
 		opts.Savedata_data = binsk
-		_t2 := NewTox(opts)
+		_t2, _ := NewTox(opts)
 		if _t2.SelfGetSecretKey() != seckey {
 			t.Error("must =")
 		}
@@ -124,7 +127,7 @@ func TestCreate(t *testing.T) {
 		}
 	})
 	t.Run("destroy", func(t *testing.T) {
-		_t := NewTox(nil)
+		_t, _ := NewTox(nil)
 		_t.Kill()
 		if _t.toxcore != nil {
 			t.Error("must nil")
@@ -133,7 +136,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestBase(t *testing.T) {
-	_t := NewTox(nil)
+	_t, _ := NewTox(nil)
 	defer _t.Kill()
 
 	t.Run("name", func(t *testing.T) {
@@ -163,26 +166,23 @@ func TestBase(t *testing.T) {
 		if _t.SelfGetStatusMessageSize() != 0 {
 			t.Error("must zero")
 		}
-		if stm, err := _t.SelfGetStatusMessage(); err != nil || len(stm) != 0 {
+		if stm := _t.SelfGetStatusMessage(); len(stm) != 0 {
 			t.Error("must empty", stm, err)
 		}
 		tmsg := "test status msg"
-		if ok, err := _t.SelfSetStatusMessage(tmsg); !ok || err != nil {
+		if err := _t.SelfSetStatusMessage(tmsg); err != nil {
 			t.Error("must ok", err)
 		}
-		if stm, err := _t.SelfGetStatusMessage(); err != nil || stm != tmsg {
+		if stm := _t.SelfGetStatusMessage(); stm != tmsg {
 			t.Error("must =", stm, err)
 		}
 		tmsg = strings.Repeat("s", MAX_STATUS_MESSAGE_LENGTH)
-		if ok, err := _t.SelfSetStatusMessage(tmsg); !ok || err != nil {
+		if err := _t.SelfSetStatusMessage(tmsg); err != nil {
 			t.Error("must ok", err)
 		}
 		tmsg = strings.Repeat("s", MAX_STATUS_MESSAGE_LENGTH+1)
-		if ok, err := _t.SelfSetStatusMessage(tmsg); ok || err == nil {
+		if err := _t.SelfSetStatusMessage(tmsg); err == nil {
 			t.Error("must failed", err)
-		}
-		if _t.SelfGetConnectionStatus() != CONNECTION_NONE {
-			t.Error("must none")
 		}
 	})
 	t.Run("address/pubkey", func(t *testing.T) {
@@ -209,31 +209,31 @@ func TestBase(t *testing.T) {
 }
 
 func TestBootstrap(t *testing.T) {
-	_t := NewTox(nil)
+	_t, _ := NewTox(nil)
 	defer _t.Kill()
 	port, _ := strconv.Atoi(bsnodes[1])
 
 	t.Run("success", func(t *testing.T) {
-		if ok, err := _t.Bootstrap(bsnodes[0], uint16(port), bsnodes[2]); !ok || err != nil {
-			t.Error("must ok", ok, err)
+		if err := _t.Bootstrap(bsnodes[0], uint16(port), bsnodes[2]); err != nil {
+			t.Error("must ok", err)
 		}
 	})
 	t.Run("failed", func(t *testing.T) {
 		brkey := bsnodes[2]
 		brkey = "XYZAB" + bsnodes[2][3:]
-		if ok, err := _t.Bootstrap(bsnodes[0], uint16(port), brkey); ok || err == nil {
-			t.Error("must failed", ok, err)
+		if err := _t.Bootstrap(bsnodes[0], uint16(port), brkey); err == nil {
+			t.Error("must failed", err)
 		}
-		if ok, err := _t.Bootstrap("a.b.c.d", uint16(port), bsnodes[2]); ok || err == nil {
-			t.Error("must failed", ok, err)
+		if err := _t.Bootstrap("a.b.c.d", uint16(port), bsnodes[2]); err == nil {
+			t.Error("must failed", err)
 		}
 	})
 	t.Run("relay", func(t *testing.T) {
-		if ok, err := _t.AddTcpRelay(bsnodes[0], uint16(port), bsnodes[2]); !ok || err != nil {
-			t.Error("must ok", ok, err)
+		if err := _t.AddTcpRelay(bsnodes[0], uint16(port), bsnodes[2]); err != nil {
+			t.Error("must ok", err)
 		}
-		if ok, err := _t.AddTcpRelay("a.b.c.d", uint16(port), bsnodes[2]); ok || err == nil {
-			t.Error("must failed", ok, err)
+		if err := _t.AddTcpRelay("a.b.c.d", uint16(port), bsnodes[2]); err == nil {
+			t.Error("must failed", err)
 		}
 	})
 }
@@ -245,7 +245,7 @@ type MiniTox struct {
 
 func NewMiniTox() *MiniTox {
 	this := &MiniTox{}
-	this.t = NewTox(nil)
+	this.t, _ = NewTox(nil)
 	this.stopch = make(chan struct{}, 0)
 	return this
 }
@@ -265,10 +265,10 @@ func (this *MiniTox) Iterate() {
 func (this *MiniTox) bootstrap() {
 	for idx := 0; idx < len(bsnodes)/3; idx++ {
 		port, err := strconv.Atoi(bsnodes[1+idx*3])
-		_, err = this.t.Bootstrap(bsnodes[0+idx*3], uint16(port), bsnodes[2+idx*3])
+		err = this.t.Bootstrap(bsnodes[0+idx*3], uint16(port), bsnodes[2+idx*3])
 		if err != nil {
 		}
-		_, err = this.t.AddTcpRelay(bsnodes[0+idx*3], uint16(port), bsnodes[2+idx*3])
+		err = this.t.AddTcpRelay(bsnodes[0+idx*3], uint16(port), bsnodes[2+idx*3])
 		if err != nil {
 		}
 	}
@@ -315,12 +315,12 @@ func TestLogin(t *testing.T) {
 				t.Error("why")
 			}
 			_t.t.Iterate()
-			if _t.t.SelfGetConnectionStatus() > CONNECTION_NONE {
+			if _t.t.SelfGetConnectionStatus() > toxenums.TOX_CONNECTION_NONE {
 				return true
 			}
 			return false
 		}, 60)
-		if _t.t.SelfGetConnectionStatus() == CONNECTION_NONE {
+		if _t.t.SelfGetConnectionStatus() == toxenums.TOX_CONNECTION_NONE {
 			t.Error("maybe iterate not use")
 		}
 	})
@@ -395,7 +395,7 @@ func TestFriend(t *testing.T) {
 		}, nil)
 
 		// testing
-		t1.t.CallbackFriendConnectionStatus(func(_ *Tox, friendNumber uint32, status int,
+		t1.t.CallbackFriendConnectionStatus(func(_ *Tox, friendNumber uint32, status toxenums.TOX_CONNECTION,
 			d interface{}) {
 		}, nil)
 		t1nameChanged := false
@@ -430,9 +430,9 @@ func TestFriend(t *testing.T) {
 				t.Error(err, status)
 				return false
 			}
-			return status > CONNECTION_NONE
+			return status > toxenums.TOX_CONNECTION_NONE
 		}, 100)
-		if status, err := t2.t.FriendGetConnectionStatus(friendNumber); err != nil || status == CONNECTION_NONE {
+		if status, err := t2.t.FriendGetConnectionStatus(friendNumber); err != nil || status == toxenums.TOX_CONNECTION_NONE {
 			t.Error(err, status)
 		}
 
@@ -452,7 +452,7 @@ func TestFriend(t *testing.T) {
 		if t1size != len(t1name) {
 			t.Error(t1size, t1name)
 		}
-		_, err = t1.t.SelfSetStatusMessage("t1status")
+		err = t1.t.SelfSetStatusMessage("t1status")
 		if err != nil {
 			t.Error(err)
 		}
@@ -476,7 +476,7 @@ func TestFriend(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		if t1st != USER_STATUS_NONE {
+		if t1st != toxenums.TOX_USER_STATUS_NONE {
 			t.Error(t1st)
 		}
 	})
@@ -509,7 +509,7 @@ func TestFriend(t *testing.T) {
 		}, 100)
 		waitcond(func() bool {
 			status, _ := t2.t.FriendGetConnectionStatus(friendNumber)
-			return status > CONNECTION_NONE
+			return status > toxenums.TOX_CONNECTION_NONE
 		}, 100)
 		_, err := t2.t.FriendSendMessage(friendNumber, "hohoo")
 		if err != nil {
@@ -549,14 +549,14 @@ func TestFriend(t *testing.T) {
 		waitcond(func() bool {
 			return 1 == t1.t.SelfGetFriendListSize()
 		}, 100)
-		_, err = t2.t.FriendDelete(friendNumber)
+		err = t2.t.FriendDelete(friendNumber)
 		if err != nil {
 			t.Error(err)
 		}
 		if t2.t.FriendExists(friendNumber) {
 			t.Error("deleted friend appearence")
 		}
-		_, err = t2.t.FriendDelete(friendNumber)
+		err = t2.t.FriendDelete(friendNumber)
 		if err == nil {
 			t.Error("delete deleted friend should failed")
 		}
@@ -579,107 +579,104 @@ func TestGroup(t *testing.T) {
 		waitcond(func() bool {
 			return t1.t.SelfGetConnectionStatus() == 2
 		}, 100)
-		gn, err := t1.t.AddGroupChat()
+		gn, err := t1.t.ConferenceNew()
 		if err != nil || gn != 0 {
 			t.Error(err)
 		}
-		_, err = t1.t.DelGroupChat(gn)
+		err = t1.t.ConferenceDelete(gn)
 		if err != nil {
 			t.Error(err)
 		}
-		if n := t1.t.CountChatList(); n != 0 {
+		if n := t1.t.ConferenceGetChatlistSize(); n != 0 {
 			t.Error(n)
 		}
-		if len(t1.t.GetChatList()) != 0 {
+		if len(t1.t.ConferenceGetChatlist()) != 0 {
 			t.Error("should 0")
 		}
 		var gcnt = 5
 		for idx := 0; idx < gcnt; idx++ {
-			gn, err = t1.t.AddGroupChat()
-			if gn != idx {
+			gn, err = t1.t.ConferenceNew()
+			if gn != uint32(idx) {
 				t.Error(gn, idx)
 			}
 			title := fmt.Sprintf("group%d", idx)
-			_, err = t1.t.GroupSetTitle(gn, title)
+			err = t1.t.ConferenceSetTitle(gn, title)
 			if err != nil {
 				t.Error(err)
 			}
-			ntitle, err := t1.t.GroupGetTitle(gn)
+			ntitle, err := t1.t.ConferenceGetTitle(gn)
 			if err != nil {
 				t.Error(err)
 			}
 			if ntitle != title {
 				t.Error(ntitle, title)
 			}
-			names := t1.t.GroupGetNames(gn)
-			if len(names) != 1 {
-				t.Error(len(names), 1)
-			}
-			pubkeys := t1.t.GroupGetPeerPubkeys(gn)
-			if len(pubkeys) != 1 {
-				t.Error(len(names), 1)
-			}
-			gtype, err := t1.t.GroupGetType(uint32(gn))
+			gtype, err := t1.t.ConferenceGetType(uint32(gn))
 			if err != nil {
 				t.Error(err)
 			}
-			if uint8(gtype) != CONFERENCE_TYPE_TEXT {
-				t.Error(gtype, CONFERENCE_TYPE_TEXT)
+			if gtype != toxenums.TOX_CONFERENCE_TYPE_TEXT {
+				t.Error(gtype, toxenums.TOX_CONFERENCE_TYPE_TEXT)
 			}
-			if t1.t.GroupNumberPeers(gn) != 1 {
+			count, err := t1.t.ConferencePeerCount(gn)
+			if err != nil {
+				t.Error(err)
+			}
+			if count != 1 {
 				t.Error(1)
 			}
-			pname, err := t1.t.GroupPeerName(gn, 0)
+			pname, err := t1.t.ConferencePeerGetName(gn, 0)
 			if err != nil {
 				t.Error(err)
 			}
 			if len(pname) != 0 {
 				t.Error(pname)
 			}
-			pubkey, err := t1.t.GroupPeerPubkey(gn, 0)
+			pubkey, err := t1.t.ConferencePeerGetPublicKey(gn, 0)
 			if err != nil {
 				t.Error(err)
 			}
 			if !strings.HasPrefix(t1.t.SelfGetAddress(), pubkey) {
 				t.Error("get peer pubkey")
 			}
-			if !t1.t.GroupPeerNumberIsOurs(gn, 0) {
+			ok, err := t1.t.ConferencePeerNumberIsOurs(gn, 0)
+			if err != nil {
+				t.Error(err)
+			}
+			if !ok {
 				t.Error("ours")
 			}
-			if t1.t.GroupPeerNumberIsOurs(gn, 789) {
+			_, err = t1.t.ConferencePeerNumberIsOurs(gn, 789)
+			if err == nil {
 				t.Error("not ours")
 			}
-			_, err = t1.t.GroupActionSend(gn, "abc")
+			err = t1.t.ConferenceSendMessage(gn, toxenums.TOX_MESSAGE_TYPE_ACTION, "abc")
 			if err == nil {
 				t.Error("should not nil")
 			}
-			_, err = t1.t.GroupMessageSend(gn, "abc")
+			err = t1.t.ConferenceSendMessage(gn, toxenums.TOX_MESSAGE_TYPE_NORMAL, "abc")
 			if err == nil {
 				t.Error("should not nil")
 			}
-			peers := t1.t.GroupGetPeers(gn)
-			if len(peers) != 1 {
-				t.Error("should 1")
-			}
-			if _, err = t1.t.JoinGroupChat(5, ""); err == nil {
+			if _, err = t1.t.ConferenceJoin(5, ""); err == nil {
 				t.Error("should not nil")
 			}
-			if _, err = t1.t.InviteFriend(123, gn); err == nil {
+			if err = t1.t.ConferenceInvite(123, gn); err == nil {
 				t.Error("should nil")
 			}
-			if cnt := t1.t.CountChatList(); int(cnt) != idx+1 {
+			if cnt := t1.t.ConferenceGetChatlistSize(); int(cnt) != idx+1 {
 				t.Error(cnt, idx+1)
 			}
-			if grps := t1.t.GetChatList(); len(grps) != idx+1 {
+			if grps := t1.t.ConferenceGetChatlist(); len(grps) != idx+1 {
 				t.Error(len(grps), idx+1)
 			}
 		}
-		grps := t1.t.GetChatList()
+		grps := t1.t.ConferenceGetChatlist()
 		if len(grps) != gcnt {
 			t.Error(len(grps), gcnt)
 		}
-		if t1.t.CountChatList() != uint32(gcnt) {
-			t.Error(t1.t.CountChatList(), gcnt)
+		if t1.t.ConferenceGetChatlistSize() != uint32(gcnt) {
+			t.Error(t1.t.ConferenceGetChatlistSize(), gcnt)
 		}
 	})
 
@@ -693,14 +690,14 @@ func TestGroup(t *testing.T) {
 			t1.t.FriendAddNorequest(friendId)
 		}, nil)
 
-		t1.t.CallbackConferenceInvite(func(_ *Tox, friendNumber uint32, itype uint8, data string, ud interface{}) {
+		t1.t.CallbackConferenceInvite(func(_ *Tox, friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, data string, ud interface{}) {
 			switch itype {
-			case CONFERENCE_TYPE_TEXT:
-				_, err := t1.t.JoinGroupChat(friendNumber, data)
+			case toxenums.TOX_CONFERENCE_TYPE_TEXT:
+				_, err := t1.t.ConferenceJoin(friendNumber, data)
 				if err != nil {
 					t.Error(err)
 				}
-			case CONFERENCE_TYPE_AV:
+			case toxenums.TOX_CONFERENCE_TYPE_AV:
 				_, err := t1.t.JoinAVGroupChat(friendNumber, data)
 				if err != nil {
 					t.Error(err)
@@ -728,15 +725,15 @@ func TestGroup(t *testing.T) {
 		}, 100)
 
 		fn, _ := t2.t.FriendByPublicKey(t1.t.SelfGetPublicKey())
-		gn, _ := t2.t.AddGroupChat()
+		gn, _ := t2.t.ConferenceNew()
 
 		// must wait friend online and can call InviteFriend
 		waitcond(func() bool {
 			st, _ := t2.t.FriendGetConnectionStatus(fn)
-			return st > CONNECTION_NONE
+			return st > toxenums.TOX_CONNECTION_NONE
 		}, 100)
 
-		_, err = t2.t.InviteFriend(fn, gn)
+		err = t2.t.ConferenceInvite(fn, gn)
 		if err != nil {
 			t.Error(err)
 		}
@@ -744,22 +741,23 @@ func TestGroup(t *testing.T) {
 			t.Error(err)
 		}
 		waitcond(func() bool {
-			return t1.t.CountChatList() == 1
+			return t1.t.ConferenceGetChatlistSize() == 1
 		}, 100)
-		if t1.t.CountChatList() != 1 {
-			t.Error("must 1 chat", t1.t.CountChatList())
+		if t1.t.ConferenceGetChatlistSize() != 1 {
+			t.Error("must 1 chat", t1.t.ConferenceGetChatlistSize())
 		}
-		if t2.t.CountChatList() != 1 {
-			t.Error("must 1 chat", t2.t.CountChatList())
+		if t2.t.ConferenceGetChatlistSize() != 1 {
+			t.Error("must 1 chat", t2.t.ConferenceGetChatlistSize())
 		}
 		waitcond(func() bool {
-			return t1.t.GroupNumberPeers(gn) > 0
+			count, err := t1.t.ConferencePeerCount(gn)
+			return err == nil && count > 0
 		}, 100)
 
-		if _, err := t1.t.DelGroupChat(gn); err != nil {
+		if err := t1.t.ConferenceDelete(gn); err != nil {
 			t.Error(err)
 		}
-		if _, err := t2.t.DelGroupChat(gn); err != nil {
+		if err := t2.t.ConferenceDelete(gn); err != nil {
 			t.Error(err)
 		}
 
@@ -778,21 +776,21 @@ func TestGroup(t *testing.T) {
 			t1.t.FriendAddNorequest(friendId)
 		}, nil)
 
-		t1.t.CallbackConferenceInvite(func(_ *Tox, friendNumber uint32, itype uint8, data string, ud interface{}) {
+		t1.t.CallbackConferenceInvite(func(_ *Tox, friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, data string, ud interface{}) {
 			switch itype {
-			case CONFERENCE_TYPE_TEXT:
-				t1.t.JoinGroupChat(friendNumber, data)
-			case CONFERENCE_TYPE_AV:
+			case toxenums.TOX_CONFERENCE_TYPE_TEXT:
+				t1.t.ConferenceJoin(friendNumber, data)
+			case toxenums.TOX_CONFERENCE_TYPE_AV:
 				t1.t.JoinAVGroupChat(friendNumber, data)
 			}
 		}, nil)
 
 		recved_act := ""
 		recved_msg := ""
-		t1.t.CallbackGroupMessage(func(_ *Tox, groupNumber, peerNumber int, msg string, ud interface{}) {
+		t1.t.CallbackConferenceMessage(func(_ *Tox, groupNumber, peerNumber uint32, msg string, ud interface{}) {
 			recved_msg = msg
 		}, nil)
-		t1.t.CallbackGroupAction(func(_ *Tox, groupNumber, peerNumber int, msg string, ud interface{}) {
+		t1.t.CallbackConferenceAction(func(_ *Tox, groupNumber, peerNumber uint32, msg string, ud interface{}) {
 			recved_act = msg
 		}, nil)
 
@@ -811,31 +809,32 @@ func TestGroup(t *testing.T) {
 		}, 100)
 
 		fn, _ := t2.t.FriendByPublicKey(t1.t.SelfGetPublicKey())
-		gn, _ := t2.t.AddGroupChat()
+		gn, _ := t2.t.ConferenceNew()
 
 		// must wait friend online and can call InviteFriend
 		waitcond(func() bool {
 			st, _ := t2.t.FriendGetConnectionStatus(fn)
-			return st > CONNECTION_NONE
+			return st > toxenums.TOX_CONNECTION_NONE
 		}, 100)
 
-		_, err = t2.t.InviteFriend(fn, gn)
+		err = t2.t.ConferenceInvite(fn, gn)
 		if err != nil {
 			t.Error(err)
 		}
 		waitcond(func() bool {
-			return t1.t.CountChatList() == 1
+			return t1.t.ConferenceGetChatlistSize() == 1
 		}, 100)
 
 		// must wait peer join
 		waitcond(func() bool {
-			return t2.t.GroupNumberPeers(gn) == 2
+			count, err := t2.t.ConferencePeerCount(gn)
+			return count == 2 && err == nil
 		}, 10)
 
-		if _, err := t2.t.GroupMessageSend(gn, "foo123"); err != nil {
+		if err := t2.t.ConferenceSendMessage(gn, toxenums.TOX_MESSAGE_TYPE_NORMAL, "foo123"); err != nil {
 			t.Error(err)
 		}
-		if _, err := t2.t.GroupActionSend(gn, "bar123"); err != nil {
+		if err := t2.t.ConferenceSendMessage(gn, toxenums.TOX_MESSAGE_TYPE_ACTION, "bar123"); err != nil {
 			t.Error(err)
 		}
 		waitcond(func() bool {
@@ -874,11 +873,11 @@ func TestFile(t *testing.T) {
 	t1.t.CallbackFileRecv(func(_ *Tox, friendNumber uint32, fileNumber uint32,
 		kind uint32, fileSize uint64, fileName string, d interface{}) {
 		log.Println(fileNumber, fileSize, fileName)
-		_, err := t1.t.FileSeek(friendNumber, fileNumber, 15)
+		err := t1.t.FileSeek(friendNumber, fileNumber, 15)
 		if err != nil {
 			t.Error(err)
 		}
-		_, err = t1.t.FileControl(friendNumber, fileNumber, FILE_CONTROL_RESUME)
+		err = t1.t.FileControl(friendNumber, fileNumber, toxenums.TOX_FILE_CONTROL_RESUME)
 		if err != nil {
 			t.Error(err)
 		}
@@ -890,7 +889,7 @@ func TestFile(t *testing.T) {
 		recvData += string(data)
 	}, nil)
 	t1.t.CallbackFileRecvControl(func(_ *Tox, friendNumber uint32, fileNumber uint32,
-		control int, ud interface{}) {
+		control toxenums.TOX_FILE_CONTROL, ud interface{}) {
 		// log.Println(fileNumber, control)
 	}, nil)
 
@@ -901,7 +900,7 @@ func TestFile(t *testing.T) {
 			return
 		}
 		s := strings.Repeat("T", length)
-		_, err := t2.t.FileSendChunk(friend_number, file_number, position, []byte(s))
+		err := t2.t.FileSendChunk(friend_number, file_number, position, []byte(s))
 		if err != nil {
 			t.Error(err)
 		}
@@ -909,9 +908,9 @@ func TestFile(t *testing.T) {
 	}, nil)
 	sendRecvDone := false
 	t2.t.CallbackFileRecvControl(func(_ *Tox, friendNumber uint32, fileNumber uint32,
-		control int, ud interface{}) {
+		control toxenums.TOX_FILE_CONTROL, ud interface{}) {
 		// log.Println(fileNumber, control)
-		if control == FILE_CONTROL_CANCEL {
+		if control == toxenums.TOX_FILE_CONTROL_CANCEL {
 			sendRecvDone = true
 		}
 	}, nil)
@@ -934,10 +933,10 @@ func TestFile(t *testing.T) {
 	// must wait friend online and can call InviteFriend
 	waitcond(func() bool {
 		st, _ := t2.t.FriendGetConnectionStatus(fn)
-		return st > CONNECTION_NONE
+		return st > toxenums.TOX_CONNECTION_NONE
 	}, 100)
 
-	fh, err := t2.t.FileSend(fn, FILE_KIND_DATA, 12345, "123456", "testfile.txt")
+	fh, err := t2.t.FileSend(fn, toxenums.TOX_FILE_KIND_DATA, 12345, "123456", "testfile.txt")
 	if err != nil {
 		t.Error(err, fh)
 	}

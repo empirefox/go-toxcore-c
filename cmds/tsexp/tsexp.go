@@ -43,16 +43,16 @@ func main() {
 	isencrypt := tox.IsDataEncrypted(data)
 	log.Println("Is encrypt: ", isencrypt)
 	if isencrypt {
-		ok, err, salt := tox.GetSalt(data)
+		salt, err := tox.GetSalt(data)
 		if err != nil {
-			log.Println(ok, err, len(salt), salt)
+			log.Println(err, len(salt), salt)
 		}
 		pkey, err := tox.DeriveWithSalt([]byte(pass), salt)
 		defer pkey.Free()
 		if err != nil {
 			log.Println(err)
 		}
-		ok, err, datad := pkey.Decrypt(data)
+		datad, err := pkey.Decrypt(data)
 		if err != nil {
 			// log.Println(ok, err, len(datad), datad[0:32])
 			log.Println("Decrypt error, check your -pass:", err)
@@ -65,11 +65,15 @@ func main() {
 	opts := tox.NewToxOptions()
 	opts.Savedata_type = tox.SAVEDATA_TYPE_TOX_SAVE
 	opts.Savedata_data = data
-	t := tox.NewTox(opts)
+	t, err := tox.NewTox(opts)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 	fnums := t.SelfGetFriendList()
 	log.Println("Self Name:", t.SelfGetName())
 	log.Println("Self ID:", t.SelfGetAddress())
-	mystmsg, err := t.SelfGetStatusMessage()
+	mystmsg := t.SelfGetStatusMessage()
 	log.Println("Status:", mystmsg)
 	log.Println("------------------------------------------")
 	log.Println("Friend Count:", len(fnums))
@@ -88,7 +92,7 @@ func main() {
 		} else {
 			otm := time.Unix(int64(tm), 0)
 			log.Println(fmt.Sprintf("Friend %d: ", fnums[i]),
-				fname, pubkey, otm, tox.ConnStatusString(status), stmsg)
+				fname, pubkey, otm, status, stmsg)
 		}
 	}
 	if len(fnums) > 20 {
