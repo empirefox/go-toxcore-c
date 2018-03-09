@@ -7,7 +7,7 @@ package tox
 #include <tox/tox.h>
 
 void callbackConferenceInviteWrapperForC(Tox*, uint32_t, TOX_CONFERENCE_TYPE, uint8_t *, size_t, void *);
-void callbackConferenceMessageWrapperForC(Tox *, uint32_t, uint32_t, TOX_MESSAGE_TYPE, int8_t *, size_t, void *);
+void callbackConferenceMessageWrapperForC(Tox *, uint32_t, uint32_t, TOX_MESSAGE_TYPE, uint8_t *, size_t, void *);
 // void callbackConferenceActionWrapperForC(Tox*, uint32_t, uint32_t, uint8_t*, size_t, void*);
 
 void callbackConferenceTitleWrapperForC(Tox*, uint32_t, uint32_t, uint8_t*, size_t, void*);
@@ -21,20 +21,17 @@ static inline __attribute__((__unused__)) void fixnousetoxgroup() {
 */
 import "C"
 import (
-	"encoding/hex"
-	"errors"
 	"fmt"
-	"strings"
 	"unsafe"
 
 	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 // conference callback type
-type cb_conference_invite_ftype func(this *Tox, friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, cookie string, userData interface{})
-type cb_conference_message_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, message string, userData interface{})
+type cb_conference_invite_ftype func(this *Tox, friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, cookie []byte, userData interface{})
+type cb_conference_message_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, message []byte, userData interface{})
 
-type cb_conference_action_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, action string, userData interface{})
+type cb_conference_action_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, action []byte, userData interface{})
 type cb_conference_title_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, title string, userData interface{})
 type cb_conference_peer_name_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, name string, userData interface{})
 type cb_conference_peer_list_changed_ftype func(this *Tox, groupNumber uint32, userData interface{})
@@ -46,8 +43,7 @@ func callbackConferenceInviteWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.TOX_CONFE
 	var this = cbUserDatas.get(m)
 	for cbfni, ud := range this.cb_conference_invites {
 		cbfn := *(*cb_conference_invite_ftype)(cbfni)
-		data := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
-		cookie := strings.ToUpper(hex.EncodeToString(data))
+		cookie := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
 		this.putcbevts(func() { cbfn(this, uint32(a0), toxenums.TOX_CONFERENCE_TYPE(a1), cookie, ud) })
 	}
 }
@@ -66,18 +62,18 @@ func (this *Tox) CallbackConferenceInviteAdd(cbfn cb_conference_invite_ftype, us
 }
 
 //export callbackConferenceMessageWrapperForC
-func callbackConferenceMessageWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, mtype C.TOX_MESSAGE_TYPE, a2 *C.int8_t, a3 C.size_t, a4 unsafe.Pointer) {
+func callbackConferenceMessageWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, mtype C.TOX_MESSAGE_TYPE, a2 *C.uint8_t, a3 C.size_t, a4 unsafe.Pointer) {
 	var this = cbUserDatas.get(m)
 	if toxenums.TOX_MESSAGE_TYPE(mtype) == toxenums.TOX_MESSAGE_TYPE_NORMAL {
 		for cbfni, ud := range this.cb_conference_messages {
 			cbfn := *(*cb_conference_message_ftype)(cbfni)
-			message := C.GoStringN((*C.char)((*C.int8_t)(a2)), C.int(a3))
+			message := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
 			this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), message, ud) })
 		}
 	} else {
 		for cbfni, ud := range this.cb_conference_actions {
 			cbfn := *(*cb_conference_action_ftype)(cbfni)
-			message := C.GoStringN((*C.char)((*C.int8_t)(a2)), C.int(a3))
+			message := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
 			this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), message, ud) })
 		}
 	}
@@ -214,7 +210,7 @@ func (this *Tox) ConferenceDelete(groupNumber uint32) error {
 func (this *Tox) ConferencePeerGetName(groupNumber uint32, peerNumber uint32) (string, error) {
 	var _gn = C.uint32_t(groupNumber)
 	var _pn = C.uint32_t(peerNumber)
-	var _name [MAX_NAME_LENGTH]byte
+	_name := make([]byte, MAX_NAME_LENGTH)
 
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
 	C.tox_conference_peer_get_name(this.toxcore, _gn, _pn, (*C.uint8_t)(&_name[0]), &cerr)
@@ -225,19 +221,18 @@ func (this *Tox) ConferencePeerGetName(groupNumber uint32, peerNumber uint32) (s
 	return C.GoString((*C.char)(safeptr(_name[:]))), nil
 }
 
-func (this *Tox) ConferencePeerGetPublicKey(groupNumber uint32, peerNumber uint32) (string, error) {
+func (this *Tox) ConferencePeerGetPublicKey(groupNumber uint32, peerNumber uint32) (*[PUBLIC_KEY_SIZE]byte, error) {
 	var _gn = C.uint32_t(groupNumber)
 	var _pn = C.uint32_t(peerNumber)
-	var _pubkey [PUBLIC_KEY_SIZE]byte
+	var pubkey [PUBLIC_KEY_SIZE]byte
 
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
-	C.tox_conference_peer_get_public_key(this.toxcore, _gn, _pn, (*C.uint8_t)(&_pubkey[0]), &cerr)
+	C.tox_conference_peer_get_public_key(this.toxcore, _gn, _pn, (*C.uint8_t)(&pubkey[0]), &cerr)
 	if cerr != 0 {
-		return "", toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
+		return nil, toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
 
-	pubkey := strings.ToUpper(hex.EncodeToString(_pubkey[:]))
-	return pubkey, nil
+	return &pubkey, nil
 }
 
 func (this *Tox) ConferenceInvite(friendNumber uint32, groupNumber uint32) error {
@@ -263,40 +258,30 @@ func (this *Tox) ConferenceInvite(friendNumber uint32, groupNumber uint32) error
 	return nil
 }
 
-func (this *Tox) ConferenceJoin(friendNumber uint32, cookie string) (uint32, error) {
-	if cookie == "" || len(cookie) < 20 {
-		return 0, errors.New("Invalid cookie:" + cookie)
-	}
-
-	data, err := hex.DecodeString(cookie)
-	if err != nil {
-
-	}
-	var datlen = len(data)
-	if data == nil || datlen < 10 {
-		return 0, errors.New("Invalid data: " + cookie)
+func (this *Tox) ConferenceJoin(friendNumber uint32, cookie []byte) (uint32, error) {
+	if cookie == nil {
+		return 0, toxenums.TOX_ERR_CONFERENCE_JOIN_INVALID_LENGTH
 	}
 
 	this.lock()
+	defer this.unlock()
+
 	var _fn = C.uint32_t(friendNumber)
-	var _length = C.size_t(datlen)
+	var _length = C.size_t(len(cookie))
 
 	var cerr C.TOX_ERR_CONFERENCE_JOIN
-	r := C.tox_conference_join(this.toxcore, _fn, (*C.uint8_t)(&data[0]), _length, &cerr)
+	r := C.tox_conference_join(this.toxcore, _fn, (*C.uint8_t)(&cookie[0]), _length, &cerr)
 	if cerr != 0 {
-		defer this.unlock()
 		return uint32(r), toxenums.TOX_ERR_CONFERENCE_JOIN(cerr)
 	}
-	defer this.unlock()
 	return uint32(r), nil
 }
 
-func (this *Tox) ConferenceSendMessage(groupNumber uint32, mtype toxenums.TOX_MESSAGE_TYPE, message string) error {
+func (this *Tox) ConferenceSendMessage(groupNumber uint32, mtype toxenums.TOX_MESSAGE_TYPE, message []byte) error {
 	this.lock()
 	defer this.unlock()
 
 	var _gn = C.uint32_t(groupNumber)
-	var _message = []byte(message)
 	var _length = C.size_t(len(message))
 
 	switch mtype {
@@ -307,7 +292,7 @@ func (this *Tox) ConferenceSendMessage(groupNumber uint32, mtype toxenums.TOX_ME
 	}
 
 	var cerr C.TOX_ERR_CONFERENCE_SEND_MESSAGE
-	C.tox_conference_send_message(this.toxcore, _gn, (C.TOX_MESSAGE_TYPE)(mtype), (*C.uint8_t)(&_message[0]), _length, &cerr)
+	C.tox_conference_send_message(this.toxcore, _gn, C.TOX_MESSAGE_TYPE(mtype), (*C.uint8_t)(&message[0]), _length, &cerr)
 	if cerr != 0 {
 		return toxenums.TOX_ERR_CONFERENCE_SEND_MESSAGE(cerr)
 	}
@@ -332,7 +317,7 @@ func (this *Tox) ConferenceSetTitle(groupNumber uint32, title string) error {
 
 func (this *Tox) ConferenceGetTitle(groupNumber uint32) (string, error) {
 	var _gn = C.uint32_t(groupNumber)
-	var _title [MAX_NAME_LENGTH]byte
+	_title := make([]byte, MAX_NAME_LENGTH)
 
 	var cerr C.TOX_ERR_CONFERENCE_TITLE
 	C.tox_conference_get_title(this.toxcore, _gn, (*C.uint8_t)(&_title[0]), &cerr)

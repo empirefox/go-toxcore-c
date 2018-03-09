@@ -2,6 +2,8 @@ package tox
 
 import (
 	"bytes"
+	"encoding/hex"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"reflect"
@@ -23,6 +25,30 @@ var loglevel = 0
 
 func SetLogLevel(level int) {
 	loglevel = level
+}
+
+func DecodeAddress(addr string) (*[ADDRESS_SIZE]byte, error) {
+	var addrb [ADDRESS_SIZE]byte
+	n, err := hex.Decode(addrb[:], bytes.ToLower([]byte(addr)))
+	if err != nil {
+		return nil, err
+	}
+	if n != ADDRESS_SIZE {
+		return nil, fmt.Errorf("Tox address bytes len should be %d, but got %d", ADDRESS_SIZE, n)
+	}
+	return &addrb, nil
+}
+
+func DecodePubkey(pubkey string) (*[PUBLIC_KEY_SIZE]byte, error) {
+	var pubkeyb [PUBLIC_KEY_SIZE]byte
+	n, err := hex.Decode(pubkeyb[:], bytes.ToLower([]byte(pubkey)))
+	if err != nil {
+		return nil, err
+	}
+	if n != PUBLIC_KEY_SIZE {
+		return nil, fmt.Errorf("Tox public key bytes len should be %d, but got %d", PUBLIC_KEY_SIZE, n)
+	}
+	return &pubkeyb, nil
 }
 
 func FileExist(fname string) bool {

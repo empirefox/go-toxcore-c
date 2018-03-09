@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -19,7 +20,7 @@ func init() {
 }
 
 var server = []interface{}{
-	"205.185.116.116", uint16(33445), "A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702",
+	"205.185.116.116", uint16(33445), mustDecodePubkey("A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702"),
 }
 var fname = "./toxecho.data"
 var debug = true
@@ -34,7 +35,7 @@ func main() {
 			log.Println(err)
 		} else {
 			opt.Savedata_data = data
-			opt.Savedata_type = tox.SAVEDATA_TYPE_TOX_SAVE
+			opt.Savedata_type = toxenums.TOX_SAVEDATA_TYPE_TOX_SAVE
 		}
 	}
 	opt.Tcp_port = 33445
@@ -49,11 +50,11 @@ func main() {
 		}
 	}
 
-	err = t.Bootstrap(server[0].(string), server[1].(uint16), server[2].(string))
+	err = t.Bootstrap(server[0].(string), server[1].(uint16), server[2].(*[tox.PUBLIC_KEY_SIZE]byte))
 	if debug && err != nil {
 		log.Println("Bootstrap:", err)
 	}
-	err = t.AddTcpRelay(server[0].(string), server[1].(uint16), server[2].(string))
+	err = t.AddTcpRelay(server[0].(string), server[1].(uint16), server[2].(*[tox.PUBLIC_KEY_SIZE]byte))
 	if debug && err != nil {
 		log.Println("AddTcpRelay:", err)
 	}
@@ -62,12 +63,12 @@ func main() {
 	seckey := t.SelfGetSecretKey()
 	toxid := t.SelfGetAddress()
 	if debug {
-		log.Println("keys:", pubkey, seckey, len(pubkey), len(seckey))
+		log.Printf("keys: %X %X %d %d\n", pubkey, seckey, len(pubkey), len(seckey))
 	}
-	log.Println("toxid:", toxid)
+	log.Printf("toxid: %X\n", toxid)
 
 	defaultName := t.SelfGetName()
-	humanName := nickPrefix + toxid[0:5]
+	humanName := nickPrefix + hex.EncodeToString(toxid[:])[:5]
 	if humanName != defaultName {
 		t.SelfSetName(humanName)
 	}
@@ -115,8 +116,8 @@ func main() {
 			log.Println("on self conn status:", status, userData)
 		}
 	}, nil)
-	t.CallbackFriendRequest(func(t *tox.Tox, friendId string, message string, userData interface{}) {
-		log.Println(friendId, message)
+	t.CallbackFriendRequest(func(t *tox.Tox, friendId *[tox.PUBLIC_KEY_SIZE]byte, message []byte, userData interface{}) {
+		log.Printf("%X: %s\n", friendId, message)
 		num, err := t.FriendAddNorequest(friendId)
 		if debug {
 			log.Println("on friend request:", num, err)
@@ -125,11 +126,11 @@ func main() {
 			t.WriteSavedata(fname)
 		}
 	}, nil)
-	t.CallbackFriendMessage(func(t *tox.Tox, friendNumber uint32, message string, userData interface{}) {
+	t.CallbackFriendMessage(func(t *tox.Tox, friendNumber uint32, message []byte, userData interface{}) {
 		if debug {
-			log.Println("on friend message:", friendNumber, message)
+			log.Printf("on friend message: %d %s", friendNumber, message)
 		}
-		n, err := t.FriendSendMessage(friendNumber, "Re: "+message)
+		n, err := t.FriendSendMessage(friendNumber, append([]byte("RE: "), message...))
 		if err != nil {
 			log.Println(n, err)
 		}
@@ -137,19 +138,19 @@ func main() {
 	t.CallbackFriendConnectionStatus(func(t *tox.Tox, friendNumber uint32, status toxenums.TOX_CONNECTION, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
-			log.Println("on friend connection status:", friendNumber, status, friendId, err)
+			log.Printf("on friend connection status: %d %v %X %v\n", friendNumber, status, friendId, err)
 		}
 	}, nil)
 	t.CallbackFriendStatus(func(t *tox.Tox, friendNumber uint32, status toxenums.TOX_USER_STATUS, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
-			log.Println("on friend status:", friendNumber, status, friendId, err)
+			log.Printf("on friend status: %d %v %X %v\n", friendNumber, status, friendId, err)
 		}
 	}, nil)
 	t.CallbackFriendStatusMessage(func(t *tox.Tox, friendNumber uint32, statusText string, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
-			log.Println("on friend status text:", friendNumber, statusText, friendId, err)
+			log.Printf("on friend status text: %d %v %X %v\n", friendNumber, statusText, friendId, err)
 		}
 	}, nil)
 
@@ -194,7 +195,7 @@ func main() {
 		control toxenums.TOX_FILE_CONTROL, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
-			log.Println("on recv file control:", friendNumber, fileNumber, control, friendId, err)
+			log.Printf("on recv file control: %d %d %v %X %v\n", friendNumber, fileNumber, control, friendId, err)
 		}
 		key := uint64(uint64(friendNumber)<<32 | uint64(fileNumber))
 		if control == toxenums.TOX_FILE_CONTROL_RESUME {
@@ -211,18 +212,18 @@ func main() {
 			}
 		}
 	}, nil)
-	t.CallbackFileRecv(func(t *tox.Tox, friendNumber uint32, fileNumber uint32, kind uint32,
-		fileSize uint64, fileName string, userData interface{}) {
+	t.CallbackFileRecv(func(t *tox.Tox, friendNumber uint32, fileNumber uint32, kind toxenums.TOX_FILE_KIND,
+		fileSize uint64, fileName []byte, userData interface{}) {
 		if debug {
 			friendId, err := t.FriendGetPublicKey(friendNumber)
-			log.Println("on recv file:", friendNumber, fileNumber, kind, fileSize, fileName, friendId, err)
+			log.Printf("on recv file: %d %d %v %d %s %X %v\n", friendNumber, fileNumber, kind, fileSize, fileName, friendId, err)
 		}
 		if fileSize > 1024*1024*1024 {
 			// good guy
 		}
 
-		var reFileName = "Re_" + fileName
-		reFileNumber, err := t.FileSend(friendNumber, kind, fileSize, reFileName, reFileName)
+		reFileName := append([]byte("RE_"), fileName...)
+		reFileNumber, err := t.FileSend(friendNumber, kind, fileSize, nil, reFileName)
 		if err != nil {
 		}
 		recvFiles[uint64(uint64(friendNumber)<<32|uint64(fileNumber))] = reFileNumber
@@ -237,7 +238,7 @@ func main() {
 
 		if len(data) == 0 {
 			if debug {
-				log.Println("recv file finished:", friendNumber, fileNumber, friendId, err)
+				log.Printf("recv file finished: %d %d %X %v\n", friendNumber, fileNumber, friendId, err)
 			}
 		} else {
 			reFileNumber := recvFiles[uint64(uint64(fileNumber)<<32|uint64(fileNumber))]
@@ -251,7 +252,7 @@ func main() {
 		friendId, err := t.FriendGetPublicKey(friendNumber)
 		if length == 0 {
 			if debug {
-				log.Println("send file finished:", friendNumber, fileNumber, friendId, err)
+				log.Printf("send file finished: %d %d %X %v\n", friendNumber, fileNumber, friendId, err)
 			}
 			origFileNumber := sendFiles[uint64(uint64(fileNumber)<<32|uint64(fileNumber))]
 			delete(sendFiles, uint64(uint64(fileNumber)<<32|uint64(fileNumber)))
@@ -372,4 +373,12 @@ func main() {
 
 func makekey(no uint32, a0 interface{}, a1 interface{}) string {
 	return fmt.Sprintf("%d_%v_%v", no, a0, a1)
+}
+
+func mustDecodePubkey(pubkey string) *[tox.PUBLIC_KEY_SIZE]byte {
+	pubkeyb, err := tox.DecodePubkey(pubkey)
+	if err != nil {
+		panic(err)
+	}
+	return pubkeyb
 }

@@ -61,7 +61,6 @@ static inline __attribute__((__unused__)) void fixnousetoxav() {
 */
 import "C"
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"unsafe"
@@ -145,6 +144,8 @@ func (this *ToxAV) Call(friendNumber uint32, audioBitRate uint32, videoBitRate u
 	}
 	return nil
 }
+
+func (t *ToxAV) CToxAV() *C.ToxAV { return t.toxav }
 
 var cbAVUserDatas = newUserDataAV()
 
@@ -364,15 +365,10 @@ func (this *Tox) AddAVGroupChat() int {
 	return int(r)
 }
 
-func (this *Tox) JoinAVGroupChat(friendNumber uint32, cookie string) (int, error) {
-	data, err := hex.DecodeString(cookie)
-	if err != nil {
-		return 0, errors.New("Invalid cookie:" + cookie)
-	}
+func (this *Tox) JoinAVGroupChat(friendNumber uint32, cookie []byte) (int, error) {
 	var _fn = C.uint32_t(friendNumber)
-	var _data = (*C.uint8_t)((unsafe.Pointer)(&data[0]))
-	var length = len(data)
-	var _length = C.uint16_t(length)
+	var _data = (*C.uint8_t)(&cookie[0])
+	var _length = C.uint16_t(len(cookie))
 
 	// TODO nil => real
 	r := C.toxav_join_av_groupchat(this.toxcore, _fn, _data, _length, nil, nil)

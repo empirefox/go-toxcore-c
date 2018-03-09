@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/TokTok/go-toxcore-c"
+	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 func init() {
@@ -72,7 +73,7 @@ func main() {
 	}
 
 	opts := tox.NewToxOptions()
-	opts.Savedata_type = tox.SAVEDATA_TYPE_TOX_SAVE
+	opts.Savedata_type = toxenums.TOX_SAVEDATA_TYPE_TOX_SAVE
 	opts.Savedata_data = data
 	t, err := tox.NewTox(opts)
 	if err != nil {
@@ -82,7 +83,7 @@ func main() {
 	fnums := t.SelfGetFriendList()
 	log.Println(fnums, t)
 	log.Println("Self Name:", t.SelfGetName())
-	log.Println("Self ID:", t.SelfGetAddress())
+	log.Printf("Self ID: %X\n", t.SelfGetAddress()[:])
 	mystmsg := t.SelfGetStatusMessage()
 	log.Println("Status:", mystmsg)
 	log.Println("------------------------------------------")

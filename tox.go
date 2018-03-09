@@ -34,10 +34,7 @@ static inline __attribute__((__unused__)) void fixnousetox() {
 */
 import "C"
 import (
-	"encoding/hex"
 	"fmt"
-	"log"
-	"strings"
 	// "sync"
 	"unsafe"
 
@@ -50,16 +47,16 @@ import (
 
 //////////
 // friend callback type
-type cb_friend_request_ftype func(this *Tox, pubkey string, message string, userData interface{})
-type cb_friend_message_ftype func(this *Tox, friendNumber uint32, message string, userData interface{})
+type cb_friend_request_ftype func(this *Tox, pubkey *[PUBLIC_KEY_SIZE]byte, message []byte, userData interface{})
+type cb_friend_message_ftype func(this *Tox, friendNumber uint32, message []byte, userData interface{})
 type cb_friend_name_ftype func(this *Tox, friendNumber uint32, newName string, userData interface{})
 type cb_friend_status_message_ftype func(this *Tox, friendNumber uint32, newStatus string, userData interface{})
 type cb_friend_status_ftype func(this *Tox, friendNumber uint32, status toxenums.TOX_USER_STATUS, userData interface{})
 type cb_friend_connection_status_ftype func(this *Tox, friendNumber uint32, status toxenums.TOX_CONNECTION, userData interface{})
 type cb_friend_typing_ftype func(this *Tox, friendNumber uint32, isTyping uint8, userData interface{})
 type cb_friend_read_receipt_ftype func(this *Tox, friendNumber uint32, receipt uint32, userData interface{})
-type cb_friend_lossy_packet_ftype func(this *Tox, friendNumber uint32, data string, userData interface{})
-type cb_friend_lossless_packet_ftype func(this *Tox, friendNumber uint32, data string, userData interface{})
+type cb_friend_lossy_packet_ftype func(this *Tox, friendNumber uint32, data []byte, userData interface{})
+type cb_friend_lossless_packet_ftype func(this *Tox, friendNumber uint32, data []byte, userData interface{})
 
 // self callback type
 type cb_self_connection_status_ftype func(this *Tox, status toxenums.TOX_CONNECTION, userData interface{})
@@ -67,8 +64,8 @@ type cb_self_connection_status_ftype func(this *Tox, status toxenums.TOX_CONNECT
 // file callback type
 type cb_file_recv_control_ftype func(this *Tox, friendNumber uint32, fileNumber uint32,
 	control toxenums.TOX_FILE_CONTROL, userData interface{})
-type cb_file_recv_ftype func(this *Tox, friendNumber uint32, fileNumber uint32, kind uint32, fileSize uint64,
-	fileName string, userData interface{})
+type cb_file_recv_ftype func(this *Tox, friendNumber uint32, fileNumber uint32, kind toxenums.TOX_FILE_KIND, fileSize uint64,
+	fileName []byte, userData interface{})
 type cb_file_recv_chunk_ftype func(this *Tox, friendNumber uint32, fileNumber uint32, position uint64,
 	data []byte, userData interface{})
 type cb_file_chunk_request_ftype func(this *Tox, friend_number uint32, file_number uint32, position uint64,
@@ -118,13 +115,11 @@ var cbUserDatas = newUserData()
 func callbackFriendRequestWrapperForC(m *C.Tox, a0 *C.uint8_t, a1 *C.uint8_t, a2 C.uint16_t, a3 unsafe.Pointer) {
 	var this = cbUserDatas.get(m)
 	for cbfni, ud := range this.cb_friend_requests {
-		pubkey_b := C.GoBytes(unsafe.Pointer(a0), C.int(PUBLIC_KEY_SIZE))
-		pubkey := hex.EncodeToString(pubkey_b)
-		pubkey = strings.ToUpper(pubkey)
-		message_b := C.GoBytes(unsafe.Pointer(a1), C.int(a2))
-		message := string(message_b)
+		var pubkey [PUBLIC_KEY_SIZE]byte
+		copy(pubkey[:], (*[1 << 30]byte)(unsafe.Pointer(a0))[:])
+		message := C.GoBytes(unsafe.Pointer(a1), C.int(a2))
 		cbfn := *(*cb_friend_request_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, pubkey, message, ud) })
+		this.putcbevts(func() { cbfn(this, &pubkey, message, ud) })
 	}
 }
 
@@ -146,7 +141,7 @@ func callbackFriendMessageWrapperForC(m *C.Tox, a0 C.uint32_t, mtype C.int,
 	a1 *C.uint8_t, a2 C.uint32_t, a3 unsafe.Pointer) {
 	var this = cbUserDatas.get(m)
 	for cbfni, ud := range this.cb_friend_messages {
-		message_ := C.GoStringN((*C.char)(unsafe.Pointer(a1)), (C.int)(a2))
+		message_ := C.GoBytes(unsafe.Pointer(a1), (C.int)(a2))
 		cbfn := *(*cb_friend_message_ftype)(cbfni)
 		this.putcbevts(func() { cbfn(this, uint32(a0), message_, ud) })
 	}
@@ -304,7 +299,7 @@ func callbackFriendLossyPacketWrapperForC(m *C.Tox, a0 C.uint32_t, a1 *C.uint8_t
 	var this = cbUserDatas.get(m)
 	for cbfni, ud := range this.cb_friend_lossy_packets {
 		cbfn := *(*cb_friend_lossy_packet_ftype)(cbfni)
-		msg := C.GoStringN((*C.char)(unsafe.Pointer(a1)), C.int(len))
+		msg := C.GoBytes(unsafe.Pointer(a1), C.int(len))
 		this.putcbevts(func() { cbfn(this, uint32(a0), msg, ud) })
 	}
 }
@@ -327,7 +322,7 @@ func callbackFriendLosslessPacketWrapperForC(m *C.Tox, a0 C.uint32_t, a1 *C.uint
 	var this = cbUserDatas.get(m)
 	for cbfni, ud := range this.cb_friend_lossless_packets {
 		cbfn := *(*cb_friend_lossless_packet_ftype)(cbfni)
-		msg := C.GoStringN((*C.char)(unsafe.Pointer(a1)), C.int(len))
+		msg := C.GoBytes(unsafe.Pointer(a1), C.int(len))
 		this.putcbevts(func() { cbfn(this, uint32(a0), msg, ud) })
 	}
 }
@@ -397,9 +392,9 @@ func callbackFileRecvWrapperForC(m *C.Tox, friendNumber C.uint32_t, fileNumber C
 	var this = cbUserDatas.get(m)
 	for cbfni, ud := range this.cb_file_recvs {
 		cbfn := *(*cb_file_recv_ftype)(cbfni)
-		fileName_ := C.GoStringN((*C.char)(unsafe.Pointer(fileName)), C.int(fileNameLength))
+		fileName_ := C.GoBytes(unsafe.Pointer(fileName), C.int(fileNameLength))
 		this.putcbevts(func() {
-			cbfn(this, uint32(friendNumber), uint32(fileNumber), uint32(kind),
+			cbfn(this, uint32(friendNumber), uint32(fileNumber), toxenums.TOX_FILE_KIND(kind),
 				uint64(fileSize), fileName_, ud)
 		})
 	}
@@ -590,21 +585,13 @@ func (this *Tox) GetSavedata() []byte {
 	return savedata
 }
 
-/*
- * @param pubkey hex 64B length
- */
-func (this *Tox) Bootstrap(addr string, port uint16, pubkey string) error {
+func (this *Tox) Bootstrap(addr string, port uint16, pubkey *[PUBLIC_KEY_SIZE]byte) error {
 	this.lock()
 	defer this.unlock()
 
-	b_pubkey, err := hex.DecodeString(pubkey)
-	if err != nil {
-		return fmt.Errorf("Invalid pubkey")
-	}
-
 	var _addr = []byte(addr)
 	var _port = C.uint16_t(port)
-	var _cpubkey = (*C.uint8_t)(&b_pubkey[0])
+	var _cpubkey = (*C.uint8_t)(&pubkey[0])
 
 	var cerr C.TOX_ERR_BOOTSTRAP
 	C.tox_bootstrap(this.toxcore, (*C.char)(unsafe.Pointer(&_addr[0])), _port, _cpubkey, &cerr)
@@ -614,86 +601,61 @@ func (this *Tox) Bootstrap(addr string, port uint16, pubkey string) error {
 	return nil
 }
 
-func (this *Tox) SelfGetAddress() string {
+func (this *Tox) SelfGetAddress() *[ADDRESS_SIZE]byte {
 	var addr [ADDRESS_SIZE]byte
-	var caddr = (*C.uint8_t)(unsafe.Pointer(&addr[0]))
-	C.tox_self_get_address(this.toxcore, caddr)
-
-	return strings.ToUpper(hex.EncodeToString(addr[:]))
+	C.tox_self_get_address(this.toxcore, (*C.uint8_t)(&addr[0]))
+	return &addr
 }
 
 func (this *Tox) SelfGetConnectionStatus() toxenums.TOX_CONNECTION {
 	return toxenums.TOX_CONNECTION(C.tox_self_get_connection_status(this.toxcore))
 }
 
-func (this *Tox) FriendAdd(friendId string, message string) (friendNumber uint32, err error) {
+func (this *Tox) FriendAdd(address *[ADDRESS_SIZE]byte, message []byte) (friendNumber uint32, err error) {
 	this.lock()
 	defer this.unlock()
 
-	friendId_b, err := hex.DecodeString(friendId)
-	if err != nil {
-		return 0, fmt.Errorf("Invalid friendId")
-	}
-
-	friendId_p := (*C.uint8_t)(&friendId_b[0])
-	cmessage := []byte(message)
-
 	var cerr C.TOX_ERR_FRIEND_ADD
-	friendNumber = uint32(C.tox_friend_add(this.toxcore, friendId_p, (*C.uint8_t)(&cmessage[0]), C.size_t(len(message)), &cerr))
+	friendNumber = uint32(C.tox_friend_add(this.toxcore, (*C.uint8_t)(&address[0]), (*C.uint8_t)(&message[0]), C.size_t(len(message)), &cerr))
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_FRIEND_ADD(cerr)
 	}
 	return
 }
 
-func (this *Tox) FriendAddNorequest(friendId string) (friendNumber uint32, err error) {
+func (this *Tox) FriendAddNorequest(pubkey *[PUBLIC_KEY_SIZE]byte) (friendNumber uint32, err error) {
 	this.lock()
 	defer this.unlock()
 
-	friendId_b, err := hex.DecodeString(friendId)
-	if err != nil {
-		return 0, fmt.Errorf("Invalid friendId")
-	}
-
-	friendId_p := (*C.uint8_t)(&friendId_b[0])
+	var _cpubkey = (*C.uint8_t)(&pubkey[0])
 
 	var cerr C.TOX_ERR_FRIEND_ADD
-	friendNumber = uint32(C.tox_friend_add_norequest(this.toxcore, friendId_p, &cerr))
+	friendNumber = uint32(C.tox_friend_add_norequest(this.toxcore, _cpubkey, &cerr))
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_FRIEND_ADD(cerr)
 	}
 	return
 }
 
-func (this *Tox) FriendByPublicKey(pubkey string) (friendNumber uint32, err error) {
-	pubkey_b, err := hex.DecodeString(pubkey)
-	if err != nil {
-		return 0, fmt.Errorf("Invalid pubkey")
-	}
-
-	var pubkey_p = (*C.uint8_t)(&pubkey_b[0])
+func (this *Tox) FriendByPublicKey(pubkey *[PUBLIC_KEY_SIZE]byte) (friendNumber uint32, err error) {
+	var _cpubkey = (*C.uint8_t)(&pubkey[0])
 
 	var cerr C.TOX_ERR_FRIEND_BY_PUBLIC_KEY
-	friendNumber = uint32(C.tox_friend_by_public_key(this.toxcore, pubkey_p, &cerr))
+	friendNumber = uint32(C.tox_friend_by_public_key(this.toxcore, _cpubkey, &cerr))
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_FRIEND_BY_PUBLIC_KEY(cerr)
 	}
 	return
 }
 
-func (this *Tox) FriendGetPublicKey(friendNumber uint32) (string, error) {
-	var _fn = C.uint32_t(friendNumber)
-	var pubkey_b = make([]byte, PUBLIC_KEY_SIZE)
-	var pubkey_p = (*C.uint8_t)(&pubkey_b[0])
-
+func (this *Tox) FriendGetPublicKey(friendNumber uint32) (*[PUBLIC_KEY_SIZE]byte, error) {
+	var pubkey [PUBLIC_KEY_SIZE]byte
 	var cerr C.TOX_ERR_FRIEND_GET_PUBLIC_KEY
-	C.tox_friend_get_public_key(this.toxcore, _fn, pubkey_p, &cerr)
+	C.tox_friend_get_public_key(this.toxcore, C.uint32_t(friendNumber), (*C.uint8_t)(&pubkey[0]), &cerr)
 	if cerr != 0 {
-		return "", toxenums.TOX_ERR_FRIEND_GET_PUBLIC_KEY(cerr)
+		return nil, toxenums.TOX_ERR_FRIEND_GET_PUBLIC_KEY(cerr)
 	}
-	pubkey_h := hex.EncodeToString(pubkey_b)
-	pubkey_h = strings.ToUpper(pubkey_h)
-	return pubkey_h, nil
+	return &pubkey, nil
 }
 
 func (this *Tox) FriendDelete(friendNumber uint32) error {
@@ -726,34 +688,32 @@ func (this *Tox) FriendExists(friendNumber uint32) bool {
 	return bool(C.tox_friend_exists(this.toxcore, _fn))
 }
 
-func (this *Tox) FriendSendMessage(friendNumber uint32, message string) (messageId uint32, err error) {
+func (this *Tox) FriendSendMessage(friendNumber uint32, message []byte) (messageId uint32, err error) {
 	this.lock()
 	defer this.unlock()
 
 	var _fn = C.uint32_t(friendNumber)
-	var _message = []byte(message)
 	var _length = C.size_t(len(message))
 
 	var mtype C.TOX_MESSAGE_TYPE = C.TOX_MESSAGE_TYPE_NORMAL
 	var cerr C.TOX_ERR_FRIEND_SEND_MESSAGE
-	messageId = uint32(C.tox_friend_send_message(this.toxcore, _fn, mtype, (*C.uint8_t)(&_message[0]), _length, &cerr))
+	messageId = uint32(C.tox_friend_send_message(this.toxcore, _fn, mtype, (*C.uint8_t)(&message[0]), _length, &cerr))
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_FRIEND_SEND_MESSAGE(cerr)
 	}
 	return
 }
 
-func (this *Tox) FriendSendAction(friendNumber uint32, action string) (messageId uint32, err error) {
+func (this *Tox) FriendSendAction(friendNumber uint32, action []byte) (messageId uint32, err error) {
 	this.lock()
 	defer this.unlock()
 
 	var _fn = C.uint32_t(friendNumber)
-	var _action = []byte(action)
 	var _length = C.size_t(len(action))
 
 	var mtype C.TOX_MESSAGE_TYPE = C.TOX_MESSAGE_TYPE_ACTION
 	var cerr C.TOX_ERR_FRIEND_SEND_MESSAGE
-	messageId = uint32(C.tox_friend_send_message(this.toxcore, _fn, mtype, (*C.uint8_t)(&_action[0]), _length, &cerr))
+	messageId = uint32(C.tox_friend_send_message(this.toxcore, _fn, mtype, (*C.uint8_t)(&action[0]), _length, &cerr))
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_FRIEND_SEND_MESSAGE(cerr)
 	}
@@ -855,27 +815,27 @@ func (this *Tox) SelfGetStatusMessageSize() int {
 func (this *Tox) FriendGetStatusMessage(friendNumber uint32) (string, error) {
 	var _fn = C.uint32_t(friendNumber)
 	var cerr C.TOX_ERR_FRIEND_QUERY
-	len := C.tox_friend_get_status_message_size(this.toxcore, _fn, &cerr)
+	size := C.tox_friend_get_status_message_size(this.toxcore, _fn, &cerr)
 	if cerr != 0 {
 		return "", toxenums.TOX_ERR_FRIEND_QUERY(cerr)
 	}
 
-	_buf := make([]byte, len)
+	_buf := make([]byte, size)
 
 	cerr = 0
 	C.tox_friend_get_status_message(this.toxcore, _fn, (*C.uint8_t)(safeptr(_buf)), &cerr)
 	if cerr != 0 {
 		return "", toxenums.TOX_ERR_FRIEND_QUERY(cerr)
 	}
-	return string(_buf[:]), nil
+	return string(_buf), nil
 }
 
 func (this *Tox) SelfGetStatusMessage() string {
-	nlen := C.tox_self_get_status_message_size(this.toxcore)
-	var _buf = make([]byte, nlen)
+	size := C.tox_self_get_status_message_size(this.toxcore)
+	var _buf = make([]byte, size)
 
 	C.tox_self_get_status_message(this.toxcore, (*C.uint8_t)(safeptr(_buf)))
-	return string(_buf[:])
+	return string(_buf)
 }
 
 func (this *Tox) FriendGetStatus(friendNumber uint32) (status toxenums.TOX_USER_STATUS, err error) {
@@ -959,54 +919,47 @@ func (this *Tox) SelfSetNospam(nospam uint32) {
 	defer this.unlock()
 
 	var _nospam = C.uint32_t(nospam)
-
 	C.tox_self_set_nospam(this.toxcore, _nospam)
 }
 
-func (this *Tox) SelfGetPublicKey() string {
-	var _pubkey [PUBLIC_KEY_SIZE]byte
-
-	C.tox_self_get_public_key(this.toxcore, (*C.uint8_t)(&_pubkey[0]))
-
-	return strings.ToUpper(hex.EncodeToString(_pubkey[:]))
+func (this *Tox) SelfGetPublicKey() *[PUBLIC_KEY_SIZE]byte {
+	var pubkey [PUBLIC_KEY_SIZE]byte
+	C.tox_self_get_public_key(this.toxcore, (*C.uint8_t)(&pubkey[0]))
+	return &pubkey
 }
 
-func (this *Tox) SelfGetSecretKey() string {
-	var _seckey [SECRET_KEY_SIZE]byte
-
-	C.tox_self_get_secret_key(this.toxcore, (*C.uint8_t)(&_seckey[0]))
-
-	return strings.ToUpper(hex.EncodeToString(_seckey[:]))
+func (this *Tox) SelfGetSecretKey() *[SECRET_KEY_SIZE]byte {
+	var seckey [SECRET_KEY_SIZE]byte
+	C.tox_self_get_secret_key(this.toxcore, (*C.uint8_t)(&seckey[0]))
+	return &seckey
 }
 
 // tox_lossy_***
 
-func (this *Tox) FriendSendLossyPacket(friendNumber uint32, data string) error {
+func (this *Tox) FriendSendLossyPacket(friendNumber uint32, data []byte) error {
 	this.lock()
 	defer this.unlock()
 
 	var _fn = C.uint32_t(friendNumber)
-	var _data = []byte(data)
 	var _length = C.size_t(len(data))
 
 	var cerr C.TOX_ERR_FRIEND_CUSTOM_PACKET
-	C.tox_friend_send_lossy_packet(this.toxcore, _fn, (*C.uint8_t)(&_data[0]), _length, &cerr)
+	C.tox_friend_send_lossy_packet(this.toxcore, _fn, (*C.uint8_t)(&data[0]), _length, &cerr)
 	if cerr != 0 {
 		return toxenums.TOX_ERR_FRIEND_CUSTOM_PACKET(cerr)
 	}
 	return nil
 }
 
-func (this *Tox) FriendSendLosslessPacket(friendNumber uint32, data string) error {
+func (this *Tox) FriendSendLosslessPacket(friendNumber uint32, data []byte) error {
 	this.lock()
 	defer this.unlock()
 
 	var _fn = C.uint32_t(friendNumber)
-	var _data = []byte(data)
 	var _length = C.size_t(len(data))
 
 	var cerr C.TOX_ERR_FRIEND_CUSTOM_PACKET
-	C.tox_friend_send_lossless_packet(this.toxcore, _fn, (*C.uint8_t)(&_data[0]), _length, &cerr)
+	C.tox_friend_send_lossless_packet(this.toxcore, _fn, (*C.uint8_t)(&data[0]), _length, &cerr)
 	if cerr != 0 {
 		return toxenums.TOX_ERR_FRIEND_CUSTOM_PACKET(cerr)
 	}
@@ -1015,13 +968,11 @@ func (this *Tox) FriendSendLosslessPacket(friendNumber uint32, data string) erro
 
 // tox_callback_avatar_**
 
-func (this *Tox) Hash(data string, datalen uint32) (string, error) {
-	_data := []byte(data)
+func (this *Tox) Hash(data []byte) []byte {
 	_hash := make([]byte, C.TOX_HASH_LENGTH)
-	var _datalen = C.size_t(datalen)
-
-	C.tox_hash((*C.uint8_t)(&_hash[0]), (*C.uint8_t)(&_data[0]), _datalen)
-	return string(_hash), nil
+	var _datalen = C.size_t(len(data))
+	C.tox_hash((*C.uint8_t)(&_hash[0]), (*C.uint8_t)(&data[0]), _datalen)
+	return _hash
 }
 
 // tox_callback_file_***
@@ -1034,18 +985,18 @@ func (this *Tox) FileControl(friendNumber uint32, fileNumber uint32, control tox
 	return nil
 }
 
-func (this *Tox) FileSend(friendNumber uint32, kind toxenums.TOX_FILE_KIND, fileSize uint64, fileId string, fileName string) (uint32, error) {
+func (this *Tox) FileSend(friendNumber uint32, kind toxenums.TOX_FILE_KIND, fileSize uint64, fileId *[FILE_ID_LENGTH]byte, fileName []byte) (uint32, error) {
 	this.lock()
 	defer this.unlock()
 
-	if len(fileId) != FILE_ID_LENGTH*2 {
+	var _fileID *C.uint8_t
+	if fileId != nil {
+		_fileID = (*C.uint8_t)(&fileId[0])
 	}
-
-	_fileName := []byte(fileName)
 
 	var cerr C.TOX_ERR_FILE_SEND
 	r := C.tox_file_send(this.toxcore, C.uint32_t(friendNumber), C.uint32_t(kind), C.uint64_t(fileSize),
-		nil, (*C.uint8_t)(&_fileName[0]), C.size_t(len(fileName)), &cerr)
+		_fileID, (*C.uint8_t)(&fileName[0]), C.size_t(len(fileName)), &cerr)
 	if cerr != 0 {
 		return uint32(r), toxenums.TOX_ERR_FILE_SEND(cerr)
 	}
@@ -1080,36 +1031,27 @@ func (this *Tox) FileSeek(friendNumber uint32, fileNumber uint32, position uint6
 	return nil
 }
 
-func (this *Tox) FileGetFileId(friendNumber uint32, fileNumber uint32) (string, error) {
+func (this *Tox) FileGetFileId(friendNumber uint32, fileNumber uint32) (*[FILE_ID_LENGTH]byte, error) {
 	var cerr C.TOX_ERR_FILE_GET
-	var fileId_b = make([]byte, C.TOX_FILE_ID_LENGTH)
+	var fileId_b [FILE_ID_LENGTH]byte
 
 	C.tox_file_get_file_id(this.toxcore, C.uint32_t(fileNumber), C.uint32_t(fileNumber),
 		(*C.uint8_t)(&fileId_b[0]), &cerr)
 	if cerr != 0 {
-		return "", toxenums.TOX_ERR_FILE_GET(cerr)
+		return nil, toxenums.TOX_ERR_FILE_GET(cerr)
 	}
-
-	var fileId_h = strings.ToUpper(hex.EncodeToString(fileId_b))
-	return fileId_h, nil
+	return &fileId_b, nil
 }
 
 // boostrap, see upper
-func (this *Tox) AddTcpRelay(addr string, port uint16, pubkey string) error {
+func (this *Tox) AddTcpRelay(addr string, port uint16, pubkey *[PUBLIC_KEY_SIZE]byte) error {
 	this.lock()
 	defer this.unlock()
 
 	var _addr = C.CString(addr)
 	defer C.free(unsafe.Pointer(_addr))
 	var _port = C.uint16_t(port)
-	b_pubkey, err := hex.DecodeString(pubkey)
-	if err != nil {
-		log.Panic(err)
-	}
-	if strings.ToUpper(hex.EncodeToString(b_pubkey)) != pubkey {
-		log.Panic("wtf, hex enc/dec err")
-	}
-	var _pubkey = (*C.uint8_t)(&b_pubkey[0])
+	var _pubkey = (*C.uint8_t)(&pubkey[0])
 
 	var cerr C.TOX_ERR_BOOTSTRAP
 	C.tox_add_tcp_relay(this.toxcore, _addr, _port, _pubkey, &cerr)
@@ -1120,3 +1062,5 @@ func (this *Tox) AddTcpRelay(addr string, port uint16, pubkey string) error {
 }
 
 func (this *Tox) putcbevts(f func()) { this.cbevts = append(this.cbevts, f) }
+
+func (t *Tox) CTox() *C.Tox { return t.toxcore }
