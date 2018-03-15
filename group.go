@@ -1,23 +1,13 @@
 package tox
 
 /*
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 #include <tox/tox.h>
 
 void callbackConferenceInviteWrapperForC(Tox*, uint32_t, TOX_CONFERENCE_TYPE, uint8_t *, size_t, void *);
 void callbackConferenceMessageWrapperForC(Tox *, uint32_t, uint32_t, TOX_MESSAGE_TYPE, uint8_t *, size_t, void *);
-// void callbackConferenceActionWrapperForC(Tox*, uint32_t, uint32_t, uint8_t*, size_t, void*);
-
 void callbackConferenceTitleWrapperForC(Tox*, uint32_t, uint32_t, uint8_t*, size_t, void*);
 void callbackConferencePeerNameWrapperForC(Tox*, uint32_t, uint32_t, uint8_t*, size_t, void*);
 void callbackConferencePeerListChangedWrapperForC(Tox*, uint32_t, void*);
-
-// fix nouse compile warning
-static inline __attribute__((__unused__)) void fixnousetoxgroup() {
-}
-
 */
 import "C"
 import (
@@ -28,352 +18,296 @@ import (
 )
 
 // conference callback type
-type cb_conference_invite_ftype func(this *Tox, friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, cookie []byte, userData interface{})
-type cb_conference_message_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, message []byte, userData interface{})
-
-type cb_conference_action_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, action []byte, userData interface{})
-type cb_conference_title_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, title string, userData interface{})
-type cb_conference_peer_name_ftype func(this *Tox, groupNumber uint32, peerNumber uint32, name string, userData interface{})
-type cb_conference_peer_list_changed_ftype func(this *Tox, groupNumber uint32, userData interface{})
+type cb_conference_invite_ftype func(friendNumber uint32, itype toxenums.TOX_CONFERENCE_TYPE, cookie []byte)
+type cb_conference_message_ftype func(groupNumber uint32, peerNumber uint32, mtype toxenums.TOX_MESSAGE_TYPE, message []byte)
+type cb_conference_title_ftype func(groupNumber uint32, peerNumber uint32, title string)
+type cb_conference_peer_name_ftype func(groupNumber uint32, peerNumber uint32, name string)
+type cb_conference_peer_list_changed_ftype func(groupNumber uint32)
 
 // tox_callback_conference_***
 
 //export callbackConferenceInviteWrapperForC
-func callbackConferenceInviteWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.TOX_CONFERENCE_TYPE, a2 *C.uint8_t, a3 C.size_t, a4 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_conference_invites {
-		cbfn := *(*cb_conference_invite_ftype)(cbfni)
-		cookie := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
-		this.putcbevts(func() { cbfn(this, uint32(a0), toxenums.TOX_CONFERENCE_TYPE(a1), cookie, ud) })
-	}
+func callbackConferenceInviteWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.TOX_CONFERENCE_TYPE, a2 *C.uint8_t, a3 C.size_t, ud unsafe.Pointer) {
+	var t = cbUserDatas.get(m)
+	cookie := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
+	t.cb_conference_invite(uint32(a0), toxenums.TOX_CONFERENCE_TYPE(a1), cookie)
 }
-
-func (this *Tox) CallbackConferenceInvite(cbfn cb_conference_invite_ftype, userData interface{}) {
-	this.CallbackConferenceInviteAdd(cbfn, userData)
-}
-func (this *Tox) CallbackConferenceInviteAdd(cbfn cb_conference_invite_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_conference_invites[cbfnp]; ok {
-		return
-	}
-	this.cb_conference_invites[cbfnp] = userData
-
-	C.tox_callback_conference_invite(this.toxcore, (*C.tox_conference_invite_cb)(C.callbackConferenceInviteWrapperForC))
+func (t *Tox) CallbackConferenceInvite(cbfn cb_conference_invite_ftype) {
+	t.cb_conference_invite = cbfn
+	C.tox_callback_conference_invite(t.toxcore, (*C.tox_conference_invite_cb)(C.callbackConferenceInviteWrapperForC))
 }
 
 //export callbackConferenceMessageWrapperForC
-func callbackConferenceMessageWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, mtype C.TOX_MESSAGE_TYPE, a2 *C.uint8_t, a3 C.size_t, a4 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	if toxenums.TOX_MESSAGE_TYPE(mtype) == toxenums.TOX_MESSAGE_TYPE_NORMAL {
-		for cbfni, ud := range this.cb_conference_messages {
-			cbfn := *(*cb_conference_message_ftype)(cbfni)
-			message := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
-			this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), message, ud) })
-		}
-	} else {
-		for cbfni, ud := range this.cb_conference_actions {
-			cbfn := *(*cb_conference_action_ftype)(cbfni)
-			message := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
-			this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), message, ud) })
-		}
-	}
+func callbackConferenceMessageWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, mtype C.TOX_MESSAGE_TYPE, a2 *C.uint8_t, a3 C.size_t, ud unsafe.Pointer) {
+	var t = cbUserDatas.get(m)
+	message := C.GoBytes((unsafe.Pointer)(a2), C.int(a3))
+	t.cb_conference_message(uint32(a0), uint32(a1), toxenums.TOX_MESSAGE_TYPE(mtype), message)
 }
-
-func (this *Tox) CallbackConferenceMessage(cbfn cb_conference_message_ftype, userData interface{}) {
-	this.CallbackConferenceMessageAdd(cbfn, userData)
-}
-func (this *Tox) CallbackConferenceMessageAdd(cbfn cb_conference_message_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_conference_messages[cbfnp]; ok {
-		return
-	}
-	this.cb_conference_messages[cbfnp] = userData
-
-	if !this.cb_conference_message_setted {
-		this.cb_conference_message_setted = true
-
-		C.tox_callback_conference_message(this.toxcore, (*C.tox_conference_message_cb)(C.callbackConferenceMessageWrapperForC))
-	}
-}
-
-func (this *Tox) CallbackConferenceAction(cbfn cb_conference_action_ftype, userData interface{}) {
-	this.CallbackConferenceActionAdd(cbfn, userData)
-}
-func (this *Tox) CallbackConferenceActionAdd(cbfn cb_conference_action_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_conference_actions[cbfnp]; ok {
-		return
-	}
-	this.cb_conference_actions[cbfnp] = userData
-
-	if !this.cb_conference_message_setted {
-		this.cb_conference_message_setted = true
-		C.tox_callback_conference_message(this.toxcore, (*C.tox_conference_message_cb)(C.callbackConferenceMessageWrapperForC))
-	}
+func (t *Tox) CallbackConferenceMessage(cbfn cb_conference_message_ftype) {
+	t.cb_conference_message = cbfn
+	C.tox_callback_conference_message(t.toxcore, (*C.tox_conference_message_cb)(C.callbackConferenceMessageWrapperForC))
 }
 
 //export callbackConferenceTitleWrapperForC
-func callbackConferenceTitleWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, a2 *C.uint8_t, a3 C.size_t, a4 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_conference_titles {
-		cbfn := *(*cb_conference_title_ftype)(cbfni)
-		title := C.GoStringN((*C.char)((unsafe.Pointer)(a2)), C.int(a3))
-		this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), title, ud) })
-	}
+func callbackConferenceTitleWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, a2 *C.uint8_t, a3 C.size_t, ud unsafe.Pointer) {
+	var t = cbUserDatas.get(m)
+	title := C.GoStringN((*C.char)((unsafe.Pointer)(a2)), C.int(a3))
+	t.cb_conference_title(uint32(a0), uint32(a1), title)
 }
-
-func (this *Tox) CallbackConferenceTitle(cbfn cb_conference_title_ftype, userData interface{}) {
-	this.CallbackConferenceTitleAdd(cbfn, userData)
-}
-func (this *Tox) CallbackConferenceTitleAdd(cbfn cb_conference_title_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_conference_titles[cbfnp]; ok {
-		return
-	}
-	this.cb_conference_titles[cbfnp] = userData
-
-	C.tox_callback_conference_title(this.toxcore, (*C.tox_conference_title_cb)(C.callbackConferenceTitleWrapperForC))
+func (t *Tox) CallbackConferenceTitle(cbfn cb_conference_title_ftype) {
+	t.cb_conference_title = cbfn
+	C.tox_callback_conference_title(t.toxcore, (*C.tox_conference_title_cb)(C.callbackConferenceTitleWrapperForC))
 }
 
 //export callbackConferencePeerNameWrapperForC
-func callbackConferencePeerNameWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, a2 *C.uint8_t, a3 C.size_t, a4 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_conference_peer_names {
-		cbfn := *(*cb_conference_peer_name_ftype)(cbfni)
-		peer_name := C.GoStringN((*C.char)((unsafe.Pointer)(a2)), C.int(a3))
-		this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), peer_name, ud) })
-	}
+func callbackConferencePeerNameWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, a2 *C.uint8_t, a3 C.size_t, ud unsafe.Pointer) {
+	var t = cbUserDatas.get(m)
+	peer_name := C.GoStringN((*C.char)((unsafe.Pointer)(a2)), C.int(a3))
+	t.cb_conference_peer_name(uint32(a0), uint32(a1), peer_name)
 }
-
-func (this *Tox) CallbackConferencePeerName(cbfn cb_conference_peer_name_ftype, userData interface{}) {
-	this.CallbackConferencePeerNameAdd(cbfn, userData)
-}
-func (this *Tox) CallbackConferencePeerNameAdd(cbfn cb_conference_peer_name_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_conference_peer_names[cbfnp]; ok {
-		return
-	}
-	this.cb_conference_peer_names[cbfnp] = userData
-
-	C.tox_callback_conference_peer_name(this.toxcore, (*C.tox_conference_peer_name_cb)(C.callbackConferencePeerNameWrapperForC))
+func (t *Tox) CallbackConferencePeerName(cbfn cb_conference_peer_name_ftype) {
+	t.cb_conference_peer_name = cbfn
+	C.tox_callback_conference_peer_name(t.toxcore, (*C.tox_conference_peer_name_cb)(C.callbackConferencePeerNameWrapperForC))
 }
 
 //export callbackConferencePeerListChangedWrapperForC
-func callbackConferencePeerListChangedWrapperForC(m *C.Tox, a0 C.uint32_t, a1 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_conference_peer_list_changeds {
-		cbfn := *(*cb_conference_peer_list_changed_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), ud) })
-	}
+func callbackConferencePeerListChangedWrapperForC(m *C.Tox, a0 C.uint32_t, ud unsafe.Pointer) {
+	var t = cbUserDatas.get(m)
+	t.cb_conference_peer_list_changed(uint32(a0))
 }
-
-func (this *Tox) CallbackConferencePeerListChanged(cbfn cb_conference_peer_list_changed_ftype, userData interface{}) {
-	this.CallbackConferencePeerListChangedAdd(cbfn, userData)
-}
-func (this *Tox) CallbackConferencePeerListChangedAdd(cbfn cb_conference_peer_list_changed_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_conference_peer_list_changeds[cbfnp]; ok {
-		return
-	}
-	this.cb_conference_peer_list_changeds[cbfnp] = userData
-
-	C.tox_callback_conference_peer_list_changed(this.toxcore, (*C.tox_conference_peer_list_changed_cb)(C.callbackConferencePeerListChangedWrapperForC))
+func (t *Tox) CallbackConferencePeerListChanged(cbfn cb_conference_peer_list_changed_ftype) {
+	t.cb_conference_peer_list_changed = cbfn
+	C.tox_callback_conference_peer_list_changed(t.toxcore, (*C.tox_conference_peer_list_changed_cb)(C.callbackConferencePeerListChangedWrapperForC))
 }
 
 // methods tox_conference_*
-func (this *Tox) ConferenceNew() (uint32, error) {
-	this.lock()
-	defer this.unlock()
 
+func (t *Tox) conferenceNew_l(data ConferenceNewData) {
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_NEW
-	r := C.tox_conference_new(this.toxcore, &cerr)
+	r := C.tox_conference_new(t.toxcore, &cerr)
 	if cerr != 0 {
-		return uint32(r), toxenums.TOX_ERR_CONFERENCE_NEW(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_NEW(cerr)
 	}
-	return uint32(r), nil
+
+	data <- &ConferenceNewResult{
+		ConferenceNumber: uint32(r),
+		Error:            err,
+	}
 }
 
-func (this *Tox) ConferenceDelete(groupNumber uint32) error {
-	this.lock()
+func (t *Tox) conferenceDelete_l(data *ConferenceDeleteData) {
+	cn := C.uint32_t(data.ConferenceNumber)
 
-	var _gn = C.uint32_t(groupNumber)
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_DELETE
-	C.tox_conference_delete(this.toxcore, _gn, &cerr)
+	C.tox_conference_delete(t.toxcore, cn, &cerr)
 	if cerr != 0 {
-		this.unlock()
-		return toxenums.TOX_ERR_CONFERENCE_DELETE(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_DELETE(cerr)
 	}
-	this.unlock()
-	return nil
+
+	data.Result <- err
 }
 
-func (this *Tox) ConferencePeerGetName(groupNumber uint32, peerNumber uint32) (string, error) {
-	var _gn = C.uint32_t(groupNumber)
-	var _pn = C.uint32_t(peerNumber)
-	_name := make([]byte, MAX_NAME_LENGTH)
+func (t *Tox) conferencePeerGetName_l(data *ConferencePeerGetNameData) {
+	cn := C.uint32_t(data.ConferenceNumber)
+	pn := C.uint32_t(data.PeerNumber)
 
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
-	C.tox_conference_peer_get_name(this.toxcore, _gn, _pn, (*C.uint8_t)(&_name[0]), &cerr)
+	size := C.tox_conference_peer_get_name_size(t.toxcore, cn, pn, &cerr)
 	if cerr != 0 {
-		return "", toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
+		data.Result <- &ConferencePeerGetNameResult{Error: toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)}
+		return
 	}
 
-	return C.GoString((*C.char)(safeptr(_name[:]))), nil
+	name := make([]byte, size)
+	C.tox_conference_peer_get_name(t.toxcore, cn, pn, (*C.uint8_t)(&name[0]), &cerr)
+	if cerr != 0 {
+		data.Result <- &ConferencePeerGetNameResult{Error: toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)}
+		return
+	}
+
+	data.Result <- &ConferencePeerGetNameResult{
+		Name: string(name),
+	}
 }
 
-func (this *Tox) ConferencePeerGetPublicKey(groupNumber uint32, peerNumber uint32) (*[PUBLIC_KEY_SIZE]byte, error) {
-	var _gn = C.uint32_t(groupNumber)
-	var _pn = C.uint32_t(peerNumber)
+func (t *Tox) conferencePeerGetPublicKey_l(data *ConferencePeerGetPublicKeyData) {
+	cn := C.uint32_t(data.ConferenceNumber)
+	pn := C.uint32_t(data.PeerNumber)
+
 	var pubkey [PUBLIC_KEY_SIZE]byte
-
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
-	C.tox_conference_peer_get_public_key(this.toxcore, _gn, _pn, (*C.uint8_t)(&pubkey[0]), &cerr)
+	C.tox_conference_peer_get_public_key(t.toxcore, cn, pn, (*C.uint8_t)(&pubkey[0]), &cerr)
 	if cerr != 0 {
-		return nil, toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
 
-	return &pubkey, nil
+	data.Result <- &ConferencePeerGetPublicKeyResult{
+		Pubkey: &pubkey,
+		Error:  err,
+	}
 }
 
-func (this *Tox) ConferenceInvite(friendNumber uint32, groupNumber uint32) error {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-	var _gn = C.uint32_t(groupNumber)
-
+func (t *Tox) conferenceInvite_l(data *ConferenceInviteData) {
 	// if give a friendNumber which not exists,
 	// the tox_invite_friend has a strange behaive: cause other tox_* call failed
 	// and the call will return true, but only strange thing accurs
 	// so just precheck the friendNumber and then go
-	if !this.FriendExists(friendNumber) {
-		return fmt.Errorf("friend not exists: %d", friendNumber)
+	if !t.FriendExists(data.FriendNumber) {
+		data.Result <- toxenums.TOX_ERR_FRIEND_QUERY_FRIEND_NOT_FOUND
+		return
 	}
 
+	cn := C.uint32_t(data.ConferenceNumber)
+	fn := C.uint32_t(data.FriendNumber)
+
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_INVITE
-	C.tox_conference_invite(this.toxcore, _fn, _gn, &cerr)
+	C.tox_conference_invite(t.toxcore, cn, fn, &cerr)
 	if cerr != 0 {
-		return toxenums.TOX_ERR_CONFERENCE_INVITE(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_INVITE(cerr)
 	}
-	return nil
+	data.Result <- err
 }
 
-func (this *Tox) ConferenceJoin(friendNumber uint32, cookie []byte) (uint32, error) {
-	if cookie == nil {
-		return 0, toxenums.TOX_ERR_CONFERENCE_JOIN_INVALID_LENGTH
+func (t *Tox) conferenceJoin_l(data *ConferenceJoinData) {
+	if data.Cookie == nil {
+		data.Result <- &ConferenceJoinResult{Error: toxenums.TOX_ERR_CONFERENCE_JOIN_INVALID_LENGTH}
+		return
 	}
 
-	this.lock()
-	defer this.unlock()
+	fn := C.uint32_t(data.FriendNumber)
 
-	var _fn = C.uint32_t(friendNumber)
-	var _length = C.size_t(len(cookie))
-
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_JOIN
-	r := C.tox_conference_join(this.toxcore, _fn, (*C.uint8_t)(&cookie[0]), _length, &cerr)
+	r := C.tox_conference_join(t.toxcore, fn, (*C.uint8_t)(&data.Cookie[0]), C.size_t(len(data.Cookie)), &cerr)
 	if cerr != 0 {
-		return uint32(r), toxenums.TOX_ERR_CONFERENCE_JOIN(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_JOIN(cerr)
 	}
-	return uint32(r), nil
+
+	data.Result <- &ConferenceJoinResult{
+		ConferenceNumber: uint32(r),
+		Error:            err,
+	}
 }
 
-func (this *Tox) ConferenceSendMessage(groupNumber uint32, mtype toxenums.TOX_MESSAGE_TYPE, message []byte) error {
-	this.lock()
-	defer this.unlock()
-
-	var _gn = C.uint32_t(groupNumber)
-	var _length = C.size_t(len(message))
-
-	switch mtype {
+func (t *Tox) conferenceSendMessage_l(data *ConferenceSendMessageData) {
+	switch data.Type {
 	case toxenums.TOX_MESSAGE_TYPE_NORMAL:
 	case toxenums.TOX_MESSAGE_TYPE_ACTION:
 	default:
-		return fmt.Errorf("Invalid message type: %v", mtype)
+		data.Result <- fmt.Errorf("Invalid tox conference message type: %v", data.Type)
+		return
 	}
 
+	cn := C.uint32_t(data.ConferenceNumber)
+	message := (*C.uint8_t)(&data.Message[0])
+	message_size := C.size_t(len(data.Message))
+
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_SEND_MESSAGE
-	C.tox_conference_send_message(this.toxcore, _gn, C.TOX_MESSAGE_TYPE(mtype), (*C.uint8_t)(&message[0]), _length, &cerr)
+	C.tox_conference_send_message(t.toxcore, cn, C.TOX_MESSAGE_TYPE(data.Type), message, message_size, &cerr)
 	if cerr != 0 {
-		return toxenums.TOX_ERR_CONFERENCE_SEND_MESSAGE(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_SEND_MESSAGE(cerr)
 	}
-	return nil
+
+	data.Result <- err
 }
 
-func (this *Tox) ConferenceSetTitle(groupNumber uint32, title string) error {
-	this.lock()
-	defer this.unlock()
+func (t *Tox) conferenceSetTitle_l(data *ConferenceSetTitleData) {
+	cn := C.uint32_t(data.ConferenceNumber)
+	title := []byte(data.Title)
+	title_size := C.size_t(len(title))
 
-	var _gn = C.uint32_t(groupNumber)
-	var _title = []byte(title)
-	var _length = C.size_t(len(title))
+	var err error
+	var cerr C.TOX_ERR_CONFERENCE_TITLE
+	C.tox_conference_set_title(t.toxcore, cn, (*C.uint8_t)(&title[0]), title_size, &cerr)
+	if cerr != 0 {
+		err = toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)
+	}
+
+	data.Result <- err
+}
+
+func (t *Tox) conferenceGetTitle_l(data *ConferenceGetTitleData) {
+	cn := C.uint32_t(data.ConferenceNumber)
 
 	var cerr C.TOX_ERR_CONFERENCE_TITLE
-	C.tox_conference_set_title(this.toxcore, _gn, (*C.uint8_t)(&_title[0]), _length, &cerr)
+	size := C.tox_conference_get_title_size(t.toxcore, cn, &cerr)
 	if cerr != 0 {
-		return toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)
+		data.Result <- &ConferenceGetTitleResult{Error: toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)}
+		return
 	}
-	return nil
+
+	title := make([]byte, size)
+	C.tox_conference_get_title(t.toxcore, cn, (*C.uint8_t)(&title[0]), &cerr)
+	if cerr != 0 {
+		data.Result <- &ConferenceGetTitleResult{Error: toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)}
+		return
+	}
+
+	data.Result <- &ConferenceGetTitleResult{Title: string(title)}
 }
 
-func (this *Tox) ConferenceGetTitle(groupNumber uint32) (string, error) {
-	var _gn = C.uint32_t(groupNumber)
-	_title := make([]byte, MAX_NAME_LENGTH)
+func (t *Tox) conferencePeerNumberIsOurs_l(data *ConferencePeerNumberIsOursData) {
+	cn := C.uint32_t(data.ConferenceNumber)
+	pn := C.uint32_t(data.PeerNumber)
 
-	var cerr C.TOX_ERR_CONFERENCE_TITLE
-	C.tox_conference_get_title(this.toxcore, _gn, (*C.uint8_t)(&_title[0]), &cerr)
-	if cerr != 0 {
-		return "", toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)
-	}
-	return C.GoString((*C.char)(safeptr(_title[:]))), nil
-}
-
-func (this *Tox) ConferencePeerNumberIsOurs(groupNumber uint32, peerNumber uint32) (bool, error) {
-	var _gn = C.uint32_t(groupNumber)
-	var _pn = C.uint32_t(peerNumber)
-
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
-	r := C.tox_conference_peer_number_is_ours(this.toxcore, _gn, _pn, &cerr)
+	r := C.tox_conference_peer_number_is_ours(t.toxcore, cn, pn, &cerr)
 	if cerr != 0 {
-		return false, toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
+		err = toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
-	return bool(r), nil
+
+	data.Result <- &ConferencePeerNumberIsOursResult{
+		Is:    bool(r),
+		Error: err,
+	}
 }
 
-func (this *Tox) ConferencePeerCount(groupNumber uint32) (uint32, error) {
-	var _gn = C.uint32_t(groupNumber)
+func (t *Tox) conferencePeerCount_l(data *ConferencePeerCountData) {
+	cn := C.uint32_t(data.ConferenceNumber)
 
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
-	r := C.tox_conference_peer_count(this.toxcore, _gn, &cerr)
+	r := C.tox_conference_peer_count(t.toxcore, cn, &cerr)
 	if cerr != 0 {
-		return 0, toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
-	}
-	return uint32(r), nil
-}
-
-func (this *Tox) ConferenceGetChatlistSize() uint32 {
-	r := C.tox_conference_get_chatlist_size(this.toxcore)
-	return uint32(r)
-}
-
-func (this *Tox) ConferenceGetChatlist() []uint32 {
-	var sz uint32 = this.ConferenceGetChatlistSize()
-	vec := make([]uint32, sz)
-	if sz == 0 {
-		return vec
+		err = toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
 
-	vec_p := unsafe.Pointer(&vec[0])
-	C.tox_conference_get_chatlist(this.toxcore, (*C.uint32_t)(vec_p))
-	return vec
+	data.Result <- &ConferencePeerCountResult{
+		Count: uint32(r),
+		Error: err,
+	}
 }
 
-func (this *Tox) ConferenceGetType(groupNumber uint32) (t toxenums.TOX_CONFERENCE_TYPE, err error) {
-	var _gn = C.uint32_t(groupNumber)
+func (t *Tox) conferenceGetChatlist_l(data ConferenceGetChatlistData) {
+	size := C.tox_conference_get_chatlist_size(t.toxcore)
+	if size == 0 {
+		data <- nil
+		return
+	}
 
+	list := make([]uint32, size)
+	C.tox_conference_get_chatlist(t.toxcore, (*C.uint32_t)(unsafe.Pointer(&list[0])))
+	data <- list
+}
+
+func (t *Tox) conferenceGetType_l(data *ConferenceGetTypeData) {
+	cn := C.uint32_t(data.ConferenceNumber)
+
+	var err error
 	var cerr C.TOX_ERR_CONFERENCE_GET_TYPE
-	t = toxenums.TOX_CONFERENCE_TYPE(C.tox_conference_get_type(this.toxcore, _gn, &cerr))
+	r := toxenums.TOX_CONFERENCE_TYPE(C.tox_conference_get_type(t.toxcore, cn, &cerr))
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_GET_TYPE(cerr)
 	}
-	return
+
+	data.Result <- &ConferenceGetTypeResult{
+		Type:  toxenums.TOX_CONFERENCE_TYPE(r),
+		Error: err,
+	}
 }

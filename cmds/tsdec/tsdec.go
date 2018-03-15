@@ -80,23 +80,23 @@ func main() {
 		log.Println(err)
 		return
 	}
-	fnums := t.SelfGetFriendList()
-	log.Println(fnums, t)
-	log.Println("Self Name:", t.SelfGetName())
-	log.Printf("Self ID: %X\n", t.SelfGetAddress()[:])
-	mystmsg := t.SelfGetStatusMessage()
+	flist := t.SelfGetFriendList()
+	log.Println(t)
+	log.Println("Self Name:", t.SelfGetName_l())
+	log.Printf("Self ID: %X\n", t.Address)
+	mystmsg := t.SelfGetStatusMessage_l()
 	log.Println("Status:", mystmsg)
 	log.Println("------------------------------------------")
-	log.Println("Friend Count:", len(fnums))
+	log.Println("Friend Count:", len(flist))
 
-	if tox.FileExist(tofile) {
-		log.Println(os.ErrExist, tofile)
+	if _, err = os.Stat(tofile); err != nil {
+		log.Println(err)
 		// return
 	}
 
 	if isencrypt { // do decrypt
 		log.Println("Decrypting...")
-		err := t.WriteSavedata(tofile)
+		err := tox.WriteSavedata(tofile, t.GetSavedata_l())
 		if err != nil {
 			log.Println(err)
 		} else {

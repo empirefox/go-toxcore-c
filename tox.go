@@ -1,1066 +1,224 @@
 package tox
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <tox/tox.h>
-
-//////
-
-void callbackFriendRequestWrapperForC(Tox *, uint8_t *, uint8_t *, uint16_t, void*);
-void callbackFriendMessageWrapperForC(Tox *, uint32_t, int, uint8_t*, uint32_t, void*);
-void callbackFriendNameWrapperForC(Tox *, uint32_t, uint8_t*, uint32_t, void*);
-void callbackFriendStatusMessageWrapperForC(Tox *, uint32_t, uint8_t*, uint32_t, void*);
-void callbackFriendStatusWrapperForC(Tox *, uint32_t, TOX_USER_STATUS, void*);
-void callbackFriendConnectionStatusWrapperForC(Tox *, uint32_t, TOX_CONNECTION, void*);
-void callbackFriendTypingWrapperForC(Tox *, uint32_t, uint8_t, void*);
-void callbackFriendReadReceiptWrapperForC(Tox *, uint32_t, uint32_t, void*);
-void callbackFriendLossyPacketWrapperForC(Tox *, uint32_t, uint8_t*, size_t, void*);
-void callbackFriendLosslessPacketWrapperForC(Tox *, uint32_t, uint8_t*, size_t, void*);
-void callbackSelfConnectionStatusWrapperForC(Tox *, TOX_CONNECTION, void*);
-void callbackFileRecvControlWrapperForC(Tox *tox, uint32_t friend_number, uint32_t file_number,
-                                      TOX_FILE_CONTROL control, void *user_data);
-void callbackFileRecvWrapperForC(Tox *tox, uint32_t friend_number, uint32_t file_number, uint32_t kind,
-                               uint64_t file_size, uint8_t *filename, size_t filename_length, void *user_data);
-void callbackFileRecvChunkWrapperForC(Tox *tox, uint32_t friend_number, uint32_t file_number, uint64_t position,
-                                    uint8_t *data, size_t length, void *user_data);
-void callbackFileChunkRequestWrapperForC(Tox *tox, uint32_t friend_number, uint32_t file_number, uint64_t position,
-                                       size_t length, void *user_data);
-
-// fix nouse compile warning
-static inline __attribute__((__unused__)) void fixnousetox() {
-}
-
-*/
+//#include <stdlib.h>
+//#include <tox/tox.h>
 import "C"
 import (
-	"fmt"
-	// "sync"
+	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/TokTok/go-toxcore-c/toxenums"
-	deadlock "github.com/sasha-s/go-deadlock"
+	"github.com/phayes/freeport"
 )
 
-// "reflect"
-// "runtime"
-
-//////////
-// friend callback type
-type cb_friend_request_ftype func(this *Tox, pubkey *[PUBLIC_KEY_SIZE]byte, message []byte, userData interface{})
-type cb_friend_message_ftype func(this *Tox, friendNumber uint32, message []byte, userData interface{})
-type cb_friend_name_ftype func(this *Tox, friendNumber uint32, newName string, userData interface{})
-type cb_friend_status_message_ftype func(this *Tox, friendNumber uint32, newStatus string, userData interface{})
-type cb_friend_status_ftype func(this *Tox, friendNumber uint32, status toxenums.TOX_USER_STATUS, userData interface{})
-type cb_friend_connection_status_ftype func(this *Tox, friendNumber uint32, status toxenums.TOX_CONNECTION, userData interface{})
-type cb_friend_typing_ftype func(this *Tox, friendNumber uint32, isTyping uint8, userData interface{})
-type cb_friend_read_receipt_ftype func(this *Tox, friendNumber uint32, receipt uint32, userData interface{})
-type cb_friend_lossy_packet_ftype func(this *Tox, friendNumber uint32, data []byte, userData interface{})
-type cb_friend_lossless_packet_ftype func(this *Tox, friendNumber uint32, data []byte, userData interface{})
-
-// self callback type
-type cb_self_connection_status_ftype func(this *Tox, status toxenums.TOX_CONNECTION, userData interface{})
-
-// file callback type
-type cb_file_recv_control_ftype func(this *Tox, friendNumber uint32, fileNumber uint32,
-	control toxenums.TOX_FILE_CONTROL, userData interface{})
-type cb_file_recv_ftype func(this *Tox, friendNumber uint32, fileNumber uint32, kind toxenums.TOX_FILE_KIND, fileSize uint64,
-	fileName []byte, userData interface{})
-type cb_file_recv_chunk_ftype func(this *Tox, friendNumber uint32, fileNumber uint32, position uint64,
-	data []byte, userData interface{})
-type cb_file_chunk_request_ftype func(this *Tox, friend_number uint32, file_number uint32, position uint64,
-	length int, user_data interface{})
-
+// Tox method end with _l should be used inside of callbacks or before Run() called.
+// All xxx_l can do the same with DoInLoop((*)xxxData{}) out side of callbacks.
 type Tox struct {
-	opts       *ToxOptions
-	toxcore    *C.Tox // save C.Tox
-	threadSafe bool
-	mu         deadlock.RWMutex
-	// mu sync.RWMutex
+	opts    *ToxOptions
+	toxcore *C.Tox
 
-	// some callbacks, should be private
-	cb_friend_requests           map[unsafe.Pointer]interface{}
-	cb_friend_messages           map[unsafe.Pointer]interface{}
-	cb_friend_names              map[unsafe.Pointer]interface{}
-	cb_friend_status_messages    map[unsafe.Pointer]interface{}
-	cb_friend_statuss            map[unsafe.Pointer]interface{}
-	cb_friend_connection_statuss map[unsafe.Pointer]interface{}
-	cb_friend_typings            map[unsafe.Pointer]interface{}
-	cb_friend_read_receipts      map[unsafe.Pointer]interface{}
-	cb_friend_lossy_packets      map[unsafe.Pointer]interface{}
-	cb_friend_lossless_packets   map[unsafe.Pointer]interface{}
-	cb_self_connection_statuss   map[unsafe.Pointer]interface{}
+	// uint32 -> *[PUBLIC_KEY_SIZE]byte
+	friendIdToPk sync.Map
 
-	cb_conference_invites            map[unsafe.Pointer]interface{}
-	cb_conference_messages           map[unsafe.Pointer]interface{}
-	cb_conference_actions            map[unsafe.Pointer]interface{}
-	cb_conference_titles             map[unsafe.Pointer]interface{}
-	cb_conference_peer_names         map[unsafe.Pointer]interface{}
-	cb_conference_peer_list_changeds map[unsafe.Pointer]interface{}
+	// [PUBLIC_KEY_SIZE]byte -> uint32
+	friendPkToId sync.Map
 
-	cb_file_recv_controls  map[unsafe.Pointer]interface{}
-	cb_file_recvs          map[unsafe.Pointer]interface{}
-	cb_file_recv_chunks    map[unsafe.Pointer]interface{}
-	cb_file_chunk_requests map[unsafe.Pointer]interface{}
+	// init with create
+	Address [ADDRESS_SIZE]byte
+	Pubkey  [PUBLIC_KEY_SIZE]byte
+	Secret  [SECRET_KEY_SIZE]byte
 
-	cb_iterate_data              interface{}
-	cb_conference_message_setted bool
+	cb_friend_request           cb_friend_request_ftype
+	cb_friend_message           cb_friend_message_ftype
+	cb_friend_name              cb_friend_name_ftype
+	cb_friend_status_message    cb_friend_status_message_ftype
+	cb_friend_status            cb_friend_status_ftype
+	cb_friend_connection_status cb_friend_connection_status_ftype
+	cb_friend_typing            cb_friend_typing_ftype
+	cb_friend_read_receipt      cb_friend_read_receipt_ftype
+	cb_friend_lossy_packet      cb_friend_lossy_packet_ftype
+	cb_friend_lossless_packet   cb_friend_lossless_packet_ftype
+	cb_self_connection_status   cb_self_connection_status_ftype
 
-	cbevts []func() // no need lock
+	cb_conference_invite            cb_conference_invite_ftype
+	cb_conference_message           cb_conference_message_ftype
+	cb_conference_title             cb_conference_title_ftype
+	cb_conference_peer_name         cb_conference_peer_name_ftype
+	cb_conference_peer_list_changed cb_conference_peer_list_changed_ftype
+
+	cb_file_recv_control  cb_file_recv_control_ftype
+	cb_file_recv          cb_file_recv_ftype
+	cb_file_recv_chunk    cb_file_recv_chunk_ftype
+	cb_file_chunk_request cb_file_chunk_request_ftype
+
+	inToxIterate bool
+
+	cbTcpPong     CallbackTcpPongFn
+	cbPostIterate []CallbackPostIterateOnceFn
+
+	pingFrameNoData          [PacketPingSize]byte
+	pongFrameNoData          [PacketPingSize]byte
+	tunnelRequestFrameNoData [PROTOCOL_BUFFER_OFFSET]byte
+	finFrameNoData           [PROTOCOL_BUFFER_OFFSET]byte
+
+	// this is buf of recv frame
+	tcpFrame_l TcpFrame
+
+	localAddr addr
+	pingUnit  time.Duration
+	pingMap_l map[uint32]*[3]int8 // count, trigger, pings_from_last_pong
+
+	// TODO split to 2 map, add tag to protocol header,
+	// we can support both client/server mode with the same peer.
+	tunnels_l   map[uint32]*TcpConn
+	tunnelids_l map[uint32]byte
+
+	tunnelAccept       chan *TcpConn
+	tunnelAcceptMu     sync.Mutex
+	tunnelAcceptClosed bool
+
+	chLoopRequest chan interface{}
+
+	stopOnce sync.Once
+	stop     chan struct{}
+	stopped  chan struct{}
+	killOnce sync.Once
+	killed   chan struct{}
 }
 
-var cbUserDatas = newUserData()
-
-//export callbackFriendRequestWrapperForC
-func callbackFriendRequestWrapperForC(m *C.Tox, a0 *C.uint8_t, a1 *C.uint8_t, a2 C.uint16_t, a3 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_requests {
-		var pubkey [PUBLIC_KEY_SIZE]byte
-		copy(pubkey[:], (*[1 << 30]byte)(unsafe.Pointer(a0))[:])
-		message := C.GoBytes(unsafe.Pointer(a1), C.int(a2))
-		cbfn := *(*cb_friend_request_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, &pubkey, message, ud) })
+func NewTox(opts *ToxOptions) (*Tox, error) {
+	if opts == nil {
+		opts = NewToxOptions()
 	}
-}
-
-func (this *Tox) CallbackFriendRequest(cbfn cb_friend_request_ftype, userData interface{}) {
-	this.CallbackFriendRequestAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendRequestAdd(cbfn cb_friend_request_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_requests[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_requests[cbfnp] = userData
-
-	C.tox_callback_friend_request(this.toxcore, (*C.tox_friend_request_cb)(C.callbackFriendRequestWrapperForC))
-}
-
-//export callbackFriendMessageWrapperForC
-func callbackFriendMessageWrapperForC(m *C.Tox, a0 C.uint32_t, mtype C.int,
-	a1 *C.uint8_t, a2 C.uint32_t, a3 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_messages {
-		message_ := C.GoBytes(unsafe.Pointer(a1), (C.int)(a2))
-		cbfn := *(*cb_friend_message_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), message_, ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendMessage(cbfn cb_friend_message_ftype, userData interface{}) {
-	this.CallbackFriendMessageAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendMessageAdd(cbfn cb_friend_message_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_messages[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_messages[cbfnp] = userData
-
-	C.tox_callback_friend_message(this.toxcore, (*C.tox_friend_message_cb)(C.callbackFriendMessageWrapperForC))
-}
-
-//export callbackFriendNameWrapperForC
-func callbackFriendNameWrapperForC(m *C.Tox, a0 C.uint32_t, a1 *C.uint8_t, a2 C.uint32_t, a3 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_names {
-		name := C.GoStringN((*C.char)((unsafe.Pointer)(a1)), C.int(a2))
-		cbfn := *(*cb_friend_name_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), name, ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendName(cbfn cb_friend_name_ftype, userData interface{}) {
-	this.CallbackFriendNameAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendNameAdd(cbfn cb_friend_name_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_names[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_names[cbfnp] = userData
-
-	C.tox_callback_friend_name(this.toxcore, (*C.tox_friend_name_cb)(C.callbackFriendNameWrapperForC))
-}
-
-//export callbackFriendStatusMessageWrapperForC
-func callbackFriendStatusMessageWrapperForC(m *C.Tox, a0 C.uint32_t, a1 *C.uint8_t, a2 C.uint32_t, a3 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_status_messages {
-		statusText := C.GoStringN((*C.char)(unsafe.Pointer(a1)), C.int(a2))
-		cbfn := *(*cb_friend_status_message_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), statusText, ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendStatusMessage(cbfn cb_friend_status_message_ftype, userData interface{}) {
-	this.CallbackFriendStatusMessageAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendStatusMessageAdd(cbfn cb_friend_status_message_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_status_messages[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_status_messages[cbfnp] = userData
-
-	C.tox_callback_friend_status_message(this.toxcore, (*C.tox_friend_status_message_cb)(C.callbackFriendStatusMessageWrapperForC))
-}
-
-//export callbackFriendStatusWrapperForC
-func callbackFriendStatusWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.TOX_USER_STATUS, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_statuss {
-		cbfn := *(*cb_friend_status_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), toxenums.TOX_USER_STATUS(a1), ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendStatus(cbfn cb_friend_status_ftype, userData interface{}) {
-	this.CallbackFriendStatusAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendStatusAdd(cbfn cb_friend_status_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_statuss[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_statuss[cbfnp] = userData
-
-	C.tox_callback_friend_status(this.toxcore, (*C.tox_friend_status_cb)(C.callbackFriendStatusWrapperForC))
-}
-
-//export callbackFriendConnectionStatusWrapperForC
-func callbackFriendConnectionStatusWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.TOX_CONNECTION, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_connection_statuss {
-		cbfn := *(*cb_friend_connection_status_ftype)((unsafe.Pointer)(cbfni))
-		this.putcbevts(func() { cbfn(this, uint32(a0), toxenums.TOX_CONNECTION(a1), ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendConnectionStatus(cbfn cb_friend_connection_status_ftype, userData interface{}) {
-	this.CallbackFriendConnectionStatusAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendConnectionStatusAdd(cbfn cb_friend_connection_status_ftype, userData interface{}) {
-	cbfnp := unsafe.Pointer(&cbfn)
-	if _, ok := this.cb_friend_connection_statuss[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_connection_statuss[cbfnp] = userData
-
-	C.tox_callback_friend_connection_status(this.toxcore, (*C.tox_friend_connection_status_cb)(C.callbackFriendConnectionStatusWrapperForC))
-}
-
-//export callbackFriendTypingWrapperForC
-func callbackFriendTypingWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint8_t, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_typings {
-		cbfn := *(*cb_friend_typing_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), uint8(a1), ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendTyping(cbfn cb_friend_typing_ftype, userData interface{}) {
-	this.CallbackFriendTypingAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendTypingAdd(cbfn cb_friend_typing_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_typings[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_typings[cbfnp] = userData
-
-	C.tox_callback_friend_typing(this.toxcore, (*C.tox_friend_typing_cb)(C.callbackFriendTypingWrapperForC))
-}
-
-//export callbackFriendReadReceiptWrapperForC
-func callbackFriendReadReceiptWrapperForC(m *C.Tox, a0 C.uint32_t, a1 C.uint32_t, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_read_receipts {
-		cbfn := *(*cb_friend_read_receipt_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(a0), uint32(a1), ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendReadReceipt(cbfn cb_friend_read_receipt_ftype, userData interface{}) {
-	this.CallbackFriendReadReceiptAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendReadReceiptAdd(cbfn cb_friend_read_receipt_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_read_receipts[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_read_receipts[cbfnp] = userData
-
-	C.tox_callback_friend_read_receipt(this.toxcore, (*C.tox_friend_read_receipt_cb)(C.callbackFriendReadReceiptWrapperForC))
-}
-
-//export callbackFriendLossyPacketWrapperForC
-func callbackFriendLossyPacketWrapperForC(m *C.Tox, a0 C.uint32_t, a1 *C.uint8_t, len C.size_t, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_lossy_packets {
-		cbfn := *(*cb_friend_lossy_packet_ftype)(cbfni)
-		msg := C.GoBytes(unsafe.Pointer(a1), C.int(len))
-		this.putcbevts(func() { cbfn(this, uint32(a0), msg, ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendLossyPacket(cbfn cb_friend_lossy_packet_ftype, userData interface{}) {
-	this.CallbackFriendLossyPacketAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendLossyPacketAdd(cbfn cb_friend_lossy_packet_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_lossy_packets[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_lossy_packets[cbfnp] = userData
-
-	C.tox_callback_friend_lossy_packet(this.toxcore, (*C.tox_friend_lossy_packet_cb)(C.callbackFriendLossyPacketWrapperForC))
-}
-
-//export callbackFriendLosslessPacketWrapperForC
-func callbackFriendLosslessPacketWrapperForC(m *C.Tox, a0 C.uint32_t, a1 *C.uint8_t, len C.size_t, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_friend_lossless_packets {
-		cbfn := *(*cb_friend_lossless_packet_ftype)(cbfni)
-		msg := C.GoBytes(unsafe.Pointer(a1), C.int(len))
-		this.putcbevts(func() { cbfn(this, uint32(a0), msg, ud) })
-	}
-}
-
-func (this *Tox) CallbackFriendLosslessPacket(cbfn cb_friend_lossless_packet_ftype, userData interface{}) {
-	this.CallbackFriendLosslessPacketAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFriendLosslessPacketAdd(cbfn cb_friend_lossless_packet_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_friend_lossless_packets[cbfnp]; ok {
-		return
-	}
-	this.cb_friend_lossless_packets[cbfnp] = userData
-
-	C.tox_callback_friend_lossless_packet(this.toxcore, (*C.tox_friend_lossless_packet_cb)(C.callbackFriendLosslessPacketWrapperForC))
-}
-
-//export callbackSelfConnectionStatusWrapperForC
-func callbackSelfConnectionStatusWrapperForC(m *C.Tox, status C.TOX_CONNECTION, a2 unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_self_connection_statuss {
-		cbfn := *(*cb_self_connection_status_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, toxenums.TOX_CONNECTION(status), ud) })
-	}
-}
-
-func (this *Tox) CallbackSelfConnectionStatus(cbfn cb_self_connection_status_ftype, userData interface{}) {
-	this.CallbackSelfConnectionStatusAdd(cbfn, userData)
-}
-func (this *Tox) CallbackSelfConnectionStatusAdd(cbfn cb_self_connection_status_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_self_connection_statuss[cbfnp]; ok {
-		return
-	}
-	this.cb_self_connection_statuss[cbfnp] = userData
-
-	C.tox_callback_self_connection_status(this.toxcore, (*C.tox_self_connection_status_cb)(C.callbackSelfConnectionStatusWrapperForC))
-}
-
-// 包内部函数
-//export callbackFileRecvControlWrapperForC
-func callbackFileRecvControlWrapperForC(m *C.Tox, friendNumber C.uint32_t, fileNumber C.uint32_t,
-	control C.TOX_FILE_CONTROL, userData unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_file_recv_controls {
-		cbfn := *(*cb_file_recv_control_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(friendNumber), uint32(fileNumber), toxenums.TOX_FILE_CONTROL(control), ud) })
-	}
-}
-
-func (this *Tox) CallbackFileRecvControl(cbfn cb_file_recv_control_ftype, userData interface{}) {
-	this.CallbackFileRecvControlAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFileRecvControlAdd(cbfn cb_file_recv_control_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_file_recv_controls[cbfnp]; ok {
-		return
-	}
-	this.cb_file_recv_controls[cbfnp] = userData
-
-	C.tox_callback_file_recv_control(this.toxcore, (*C.tox_file_recv_control_cb)(C.callbackFileRecvControlWrapperForC))
-}
-
-//export callbackFileRecvWrapperForC
-func callbackFileRecvWrapperForC(m *C.Tox, friendNumber C.uint32_t, fileNumber C.uint32_t, kind C.uint32_t,
-	fileSize C.uint64_t, fileName *C.uint8_t, fileNameLength C.size_t, userData unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_file_recvs {
-		cbfn := *(*cb_file_recv_ftype)(cbfni)
-		fileName_ := C.GoBytes(unsafe.Pointer(fileName), C.int(fileNameLength))
-		this.putcbevts(func() {
-			cbfn(this, uint32(friendNumber), uint32(fileNumber), toxenums.TOX_FILE_KIND(kind),
-				uint64(fileSize), fileName_, ud)
-		})
-	}
-}
-
-func (this *Tox) CallbackFileRecv(cbfn cb_file_recv_ftype, userData interface{}) {
-	this.CallbackFileRecvAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFileRecvAdd(cbfn cb_file_recv_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_file_recvs[cbfnp]; ok {
-		return
-	}
-	this.cb_file_recvs[cbfnp] = userData
-
-	C.tox_callback_file_recv(this.toxcore, (*C.tox_file_recv_cb)(C.callbackFileRecvWrapperForC))
-}
-
-//export callbackFileRecvChunkWrapperForC
-func callbackFileRecvChunkWrapperForC(m *C.Tox, friendNumber C.uint32_t, fileNumber C.uint32_t,
-	position C.uint64_t, data *C.uint8_t, length C.size_t, userData unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_file_recv_chunks {
-		cbfn := *(*cb_file_recv_chunk_ftype)(cbfni)
-		data_ := C.GoBytes((unsafe.Pointer)(data), C.int(length))
-		this.putcbevts(func() { cbfn(this, uint32(friendNumber), uint32(fileNumber), uint64(position), data_, ud) })
-	}
-}
-
-func (this *Tox) CallbackFileRecvChunk(cbfn cb_file_recv_chunk_ftype, userData interface{}) {
-	this.CallbackFileRecvChunkAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFileRecvChunkAdd(cbfn cb_file_recv_chunk_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_file_recv_chunks[cbfnp]; ok {
-		return
-	}
-	this.cb_file_recv_chunks[cbfnp] = userData
-
-	C.tox_callback_file_recv_chunk(this.toxcore, (*C.tox_file_recv_chunk_cb)(C.callbackFileRecvChunkWrapperForC))
-}
-
-//export callbackFileChunkRequestWrapperForC
-func callbackFileChunkRequestWrapperForC(m *C.Tox, friendNumber C.uint32_t, fileNumber C.uint32_t,
-	position C.uint64_t, length C.size_t, userData unsafe.Pointer) {
-	var this = cbUserDatas.get(m)
-	for cbfni, ud := range this.cb_file_chunk_requests {
-		cbfn := *(*cb_file_chunk_request_ftype)(cbfni)
-		this.putcbevts(func() { cbfn(this, uint32(friendNumber), uint32(fileNumber), uint64(position), int(length), ud) })
-	}
-}
-
-func (this *Tox) CallbackFileChunkRequest(cbfn cb_file_chunk_request_ftype, userData interface{}) {
-	this.CallbackFileChunkRequestAdd(cbfn, userData)
-}
-func (this *Tox) CallbackFileChunkRequestAdd(cbfn cb_file_chunk_request_ftype, userData interface{}) {
-	cbfnp := (unsafe.Pointer)(&cbfn)
-	if _, ok := this.cb_file_chunk_requests[cbfnp]; ok {
-		return
-	}
-	this.cb_file_chunk_requests[cbfnp] = userData
-
-	C.tox_callback_file_chunk_request(this.toxcore, (*C.tox_file_chunk_request_cb)(C.callbackFileChunkRequestWrapperForC))
-}
-
-func NewTox(opt *ToxOptions) (t *Tox, err error) {
-	var tox Tox
-	if opt != nil {
-		tox.opts = opt
-	} else {
-		tox.opts = NewToxOptions()
-	}
-	toxopts := tox.opts.toCToxOptions()
-	defer C.tox_options_free(toxopts)
+	toxopts := opts.toCToxOptions()
+	defer func() {
+		if opts.Proxy_host != "" {
+			C.free(unsafe.Pointer(C.tox_options_get_proxy_host(toxopts)))
+		}
+		C.tox_options_free(toxopts)
+	}()
 
 	var cerr C.TOX_ERR_NEW
-	var toxcore = C.tox_new(toxopts, &cerr)
-	tox.toxcore = toxcore
-	if toxcore == nil {
-		err = toxenums.TOX_ERR_NEW(cerr)
-		return
-	}
-	cbUserDatas.set(toxcore, &tox)
-
-	//
-	tox.cb_friend_requests = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_messages = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_names = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_status_messages = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_statuss = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_connection_statuss = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_typings = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_read_receipts = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_lossy_packets = make(map[unsafe.Pointer]interface{})
-	tox.cb_friend_lossless_packets = make(map[unsafe.Pointer]interface{})
-	tox.cb_self_connection_statuss = make(map[unsafe.Pointer]interface{})
-
-	tox.cb_conference_invites = make(map[unsafe.Pointer]interface{})
-	tox.cb_conference_messages = make(map[unsafe.Pointer]interface{})
-	tox.cb_conference_actions = make(map[unsafe.Pointer]interface{})
-	tox.cb_conference_titles = make(map[unsafe.Pointer]interface{})
-	tox.cb_conference_peer_names = make(map[unsafe.Pointer]interface{})
-	tox.cb_conference_peer_list_changeds = make(map[unsafe.Pointer]interface{})
-
-	tox.cb_file_recv_controls = make(map[unsafe.Pointer]interface{})
-	tox.cb_file_recvs = make(map[unsafe.Pointer]interface{})
-	tox.cb_file_recv_chunks = make(map[unsafe.Pointer]interface{})
-	tox.cb_file_chunk_requests = make(map[unsafe.Pointer]interface{})
-
-	return &tox, nil
-}
-
-func (this *Tox) Kill() {
-	if this == nil || this.toxcore == nil {
-		return
-	}
-
-	this.lock()
-	defer this.unlock()
-
-	cbUserDatas.del(this.toxcore)
-	C.tox_kill(this.toxcore)
-	this.toxcore = nil
-}
-
-// uint32_t tox_iteration_interval(Tox *tox);
-func (this *Tox) IterationInterval() int {
-	this.lock()
-	defer this.unlock()
-
-	r := C.tox_iteration_interval(this.toxcore)
-	return int(r)
-}
-
-/* The main loop that needs to be run in intervals of tox_iteration_interval() ms. */
-// void tox_iterate(Tox *tox);
-// compatable with legacy version
-func (this *Tox) Iterate() {
-	this.lock()
-	C.tox_iterate(this.toxcore, nil)
-	cbevts := this.cbevts
-	this.cbevts = nil
-	this.unlock()
-
-	this.invokeCallbackEvents(cbevts)
-}
-
-// for toktok new method
-func (this *Tox) Iterate2(userData interface{}) {
-	this.lock()
-	this.cb_iterate_data = userData
-	C.tox_iterate(this.toxcore, nil)
-	this.cb_iterate_data = nil
-	cbevts := this.cbevts
-	this.cbevts = nil
-	this.unlock()
-
-	this.invokeCallbackEvents(cbevts)
-}
-
-func (this *Tox) invokeCallbackEvents(cbevts []func()) {
-	for _, cbfn := range cbevts {
-		cbfn()
-	}
-}
-
-func (this *Tox) lock() {
-	if this.opts.ThreadSafe {
-		this.mu.Lock()
-	}
-}
-func (this *Tox) unlock() {
-	if this.opts.ThreadSafe {
-		this.mu.Unlock()
-	}
-}
-
-func (this *Tox) GetSavedataSize() int32 {
-	r := C.tox_get_savedata_size(this.toxcore)
-	return int32(r)
-}
-
-func (this *Tox) GetSavedata() []byte {
-	r := C.tox_get_savedata_size(this.toxcore)
-	var savedata = make([]byte, int(r))
-
-	C.tox_get_savedata(this.toxcore, (*C.uint8_t)(&savedata[0]))
-	return savedata
-}
-
-func (this *Tox) Bootstrap(addr string, port uint16, pubkey *[PUBLIC_KEY_SIZE]byte) error {
-	this.lock()
-	defer this.unlock()
-
-	var _addr = []byte(addr)
-	var _port = C.uint16_t(port)
-	var _cpubkey = (*C.uint8_t)(&pubkey[0])
-
-	var cerr C.TOX_ERR_BOOTSTRAP
-	C.tox_bootstrap(this.toxcore, (*C.char)(unsafe.Pointer(&_addr[0])), _port, _cpubkey, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_BOOTSTRAP(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) SelfGetAddress() *[ADDRESS_SIZE]byte {
-	var addr [ADDRESS_SIZE]byte
-	C.tox_self_get_address(this.toxcore, (*C.uint8_t)(&addr[0]))
-	return &addr
-}
-
-func (this *Tox) SelfGetConnectionStatus() toxenums.TOX_CONNECTION {
-	return toxenums.TOX_CONNECTION(C.tox_self_get_connection_status(this.toxcore))
-}
-
-func (this *Tox) FriendAdd(address *[ADDRESS_SIZE]byte, message []byte) (friendNumber uint32, err error) {
-	this.lock()
-	defer this.unlock()
-
-	var cerr C.TOX_ERR_FRIEND_ADD
-	friendNumber = uint32(C.tox_friend_add(this.toxcore, (*C.uint8_t)(&address[0]), (*C.uint8_t)(&message[0]), C.size_t(len(message)), &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_ADD(cerr)
-	}
-	return
-}
-
-func (this *Tox) FriendAddNorequest(pubkey *[PUBLIC_KEY_SIZE]byte) (friendNumber uint32, err error) {
-	this.lock()
-	defer this.unlock()
-
-	var _cpubkey = (*C.uint8_t)(&pubkey[0])
-
-	var cerr C.TOX_ERR_FRIEND_ADD
-	friendNumber = uint32(C.tox_friend_add_norequest(this.toxcore, _cpubkey, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_ADD(cerr)
-	}
-	return
-}
-
-func (this *Tox) FriendByPublicKey(pubkey *[PUBLIC_KEY_SIZE]byte) (friendNumber uint32, err error) {
-	var _cpubkey = (*C.uint8_t)(&pubkey[0])
-
-	var cerr C.TOX_ERR_FRIEND_BY_PUBLIC_KEY
-	friendNumber = uint32(C.tox_friend_by_public_key(this.toxcore, _cpubkey, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_BY_PUBLIC_KEY(cerr)
-	}
-	return
-}
-
-func (this *Tox) FriendGetPublicKey(friendNumber uint32) (*[PUBLIC_KEY_SIZE]byte, error) {
-	var pubkey [PUBLIC_KEY_SIZE]byte
-	var cerr C.TOX_ERR_FRIEND_GET_PUBLIC_KEY
-	C.tox_friend_get_public_key(this.toxcore, C.uint32_t(friendNumber), (*C.uint8_t)(&pubkey[0]), &cerr)
-	if cerr != 0 {
-		return nil, toxenums.TOX_ERR_FRIEND_GET_PUBLIC_KEY(cerr)
-	}
-	return &pubkey, nil
-}
-
-func (this *Tox) FriendDelete(friendNumber uint32) error {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_DELETE
-	C.tox_friend_delete(this.toxcore, _fn, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FRIEND_DELETE(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) FriendGetConnectionStatus(friendNumber uint32) (status toxenums.TOX_CONNECTION, err error) {
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	status = toxenums.TOX_CONNECTION(C.tox_friend_get_connection_status(this.toxcore, _fn, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return
-}
-
-func (this *Tox) FriendExists(friendNumber uint32) bool {
-	var _fn = C.uint32_t(friendNumber)
-	return bool(C.tox_friend_exists(this.toxcore, _fn))
-}
-
-func (this *Tox) FriendSendMessage(friendNumber uint32, message []byte) (messageId uint32, err error) {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-	var _length = C.size_t(len(message))
-
-	var mtype C.TOX_MESSAGE_TYPE = C.TOX_MESSAGE_TYPE_NORMAL
-	var cerr C.TOX_ERR_FRIEND_SEND_MESSAGE
-	messageId = uint32(C.tox_friend_send_message(this.toxcore, _fn, mtype, (*C.uint8_t)(&message[0]), _length, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_SEND_MESSAGE(cerr)
-	}
-	return
-}
-
-func (this *Tox) FriendSendAction(friendNumber uint32, action []byte) (messageId uint32, err error) {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-	var _length = C.size_t(len(action))
-
-	var mtype C.TOX_MESSAGE_TYPE = C.TOX_MESSAGE_TYPE_ACTION
-	var cerr C.TOX_ERR_FRIEND_SEND_MESSAGE
-	messageId = uint32(C.tox_friend_send_message(this.toxcore, _fn, mtype, (*C.uint8_t)(&action[0]), _length, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_SEND_MESSAGE(cerr)
-	}
-	return
-}
-
-func (this *Tox) SelfSetName(name string) error {
-	this.lock()
-	defer this.unlock()
-
-	var _name = []byte(name)
-	var _length = C.size_t(len(name))
-
-	var cerr C.TOX_ERR_SET_INFO
-	C.tox_self_set_name(this.toxcore, (*C.uint8_t)(&_name[0]), _length, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_SET_INFO(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) SelfGetName() string {
-	nlen := C.tox_self_get_name_size(this.toxcore)
-	_name := make([]byte, nlen)
-
-	C.tox_self_get_name(this.toxcore, (*C.uint8_t)(safeptr(_name)))
-	return string(_name)
-}
-
-func (this *Tox) FriendGetName(friendNumber uint32) (string, error) {
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	nlen := C.tox_friend_get_name_size(this.toxcore, _fn, &cerr)
-	if cerr != 0 {
-		return "", toxenums.TOX_ERR_FRIEND_QUERY(cerr)
+	decrypt := opts.Decrypt
+	toxcore := C.tox_new(toxopts, &cerr)
+	for cerr != 0 {
+		switch err := toxenums.TOX_ERR_NEW(cerr); err {
+		case toxenums.TOX_ERR_NEW_PORT_ALLOC:
+			if opts.Tcp_port == 0 {
+				return nil, err
+			}
+			if !opts.AutoTcpPortIfErr {
+				return nil, err
+			}
+			port, ferr := freeport.GetFreePort()
+			if ferr != nil {
+				if !opts.DisableTcpPortIfAutoErr {
+					return nil, ferr
+				}
+				port = 0
+			}
+			opts.Tcp_port = uint16(port)
+			C.tox_options_set_tcp_port(toxopts, (C.uint16_t)(opts.Tcp_port))
+		case toxenums.TOX_ERR_NEW_PROXY_BAD_TYPE,
+			toxenums.TOX_ERR_NEW_PROXY_BAD_HOST,
+			toxenums.TOX_ERR_NEW_PROXY_BAD_PORT,
+			toxenums.TOX_ERR_NEW_PROXY_NOT_FOUND:
+			if opts.Proxy_type == toxenums.TOX_PROXY_TYPE_NONE {
+				return nil, err
+			}
+			if !opts.ProxyToNoneIfErr {
+				return nil, err
+			}
+			opts.Proxy_type = toxenums.TOX_PROXY_TYPE_NONE
+			C.tox_options_set_proxy_type(toxopts, C.TOX_PROXY_TYPE_NONE)
+		case toxenums.TOX_ERR_NEW_LOAD_ENCRYPTED:
+			if decrypt == nil {
+				return nil, err
+			}
+			data, derr := decrypt(opts.Savedata_data)
+			if derr != nil {
+				return nil, derr
+			}
+			decrypt = nil
+			opts.Savedata_data = data
+			C.tox_options_set_savedata_data(toxopts, (*C.uint8_t)(&data[0]), C.size_t(len(data)))
+		default:
+			return nil, err
+		}
+		toxcore = C.tox_new(toxopts, &cerr)
 	}
 
-	_name := make([]byte, nlen)
-	C.tox_friend_get_name(this.toxcore, _fn, (*C.uint8_t)(safeptr(_name)), &cerr)
-	if cerr != 0 {
-		return "", toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return string(_name), nil
-}
+	// TODO make chan len configurable
+	t := Tox{
+		opts:    opts,
+		toxcore: toxcore,
 
-func (this *Tox) FriendGetNameSize(friendNumber uint32) (int, error) {
-	var _fn = C.uint32_t(friendNumber)
+		pingFrameNoData:          pingFrameNoData,
+		pongFrameNoData:          pongFrameNoData,
+		tunnelRequestFrameNoData: tunnelRequestFrameNoData,
+		finFrameNoData:           finFrameNoData,
 
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	r := C.tox_friend_get_name_size(this.toxcore, _fn, &cerr)
-	if cerr != 0 {
-		return int(r), toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return int(r), nil
-}
+		pingUnit:    opts.PingUnit,
+		pingMap_l:   make(map[uint32]*[3]int8),
+		tunnels_l:   make(map[uint32]*TcpConn),
+		tunnelids_l: make(map[uint32]byte),
 
-func (this *Tox) SelfGetNameSize() int {
-	r := C.tox_self_get_name_size(this.toxcore)
-	return int(r)
-}
+		tunnelAccept: make(chan *TcpConn, 16),
 
-func (this *Tox) SelfSetStatusMessage(status string) error {
-	this.lock()
-	defer this.unlock()
-
-	var _status = []byte(status)
-	var _length = C.size_t(len(status))
-
-	var cerr C.TOX_ERR_SET_INFO
-	C.tox_self_set_status_message(this.toxcore, (*C.uint8_t)(&_status[0]), _length, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_SET_INFO(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) SelfSetStatus(status toxenums.TOX_USER_STATUS) {
-	var _status = C.TOX_USER_STATUS(status)
-	C.tox_self_set_status(this.toxcore, _status)
-}
-
-func (this *Tox) FriendGetStatusMessageSize(friendNumber uint32) (int, error) {
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	r := C.tox_friend_get_status_message_size(this.toxcore, _fn, &cerr)
-	if cerr != 0 {
-		return int(r), toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return int(r), nil
-}
-
-func (this *Tox) SelfGetStatusMessageSize() int {
-	r := C.tox_self_get_status_message_size(this.toxcore)
-	return int(r)
-}
-
-func (this *Tox) FriendGetStatusMessage(friendNumber uint32) (string, error) {
-	var _fn = C.uint32_t(friendNumber)
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	size := C.tox_friend_get_status_message_size(this.toxcore, _fn, &cerr)
-	if cerr != 0 {
-		return "", toxenums.TOX_ERR_FRIEND_QUERY(cerr)
+		chLoopRequest: make(chan interface{}, 1024),
+		stop:          make(chan struct{}),
+		stopped:       make(chan struct{}),
+		killed:        make(chan struct{}),
 	}
 
-	_buf := make([]byte, size)
-
-	cerr = 0
-	C.tox_friend_get_status_message(this.toxcore, _fn, (*C.uint8_t)(safeptr(_buf)), &cerr)
-	if cerr != 0 {
-		return "", toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return string(_buf), nil
-}
-
-func (this *Tox) SelfGetStatusMessage() string {
-	size := C.tox_self_get_status_message_size(this.toxcore)
-	var _buf = make([]byte, size)
-
-	C.tox_self_get_status_message(this.toxcore, (*C.uint8_t)(safeptr(_buf)))
-	return string(_buf)
-}
-
-func (this *Tox) FriendGetStatus(friendNumber uint32) (status toxenums.TOX_USER_STATUS, err error) {
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	status = toxenums.TOX_USER_STATUS(C.tox_friend_get_status(this.toxcore, _fn, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return
-}
-
-func (this *Tox) SelfGetStatus() toxenums.TOX_USER_STATUS {
-	r := C.tox_self_get_status(this.toxcore)
-	return toxenums.TOX_USER_STATUS(r)
-}
-
-func (this *Tox) FriendGetLastOnline(friendNumber uint32) (unixTime uint64, err error) {
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_GET_LAST_ONLINE
-	unixTime = uint64(C.tox_friend_get_last_online(this.toxcore, _fn, &cerr))
-	if cerr != 0 {
-		err = toxenums.TOX_ERR_FRIEND_GET_LAST_ONLINE(cerr)
-	}
-	return
-}
-
-func (this *Tox) SelfSetTyping(friendNumber uint32, typing bool) error {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-	var _typing = C._Bool(typing)
-
-	var cerr C.TOX_ERR_SET_TYPING
-	C.tox_self_set_typing(this.toxcore, _fn, _typing, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_SET_TYPING(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) FriendGetTyping(friendNumber uint32) error {
-	var _fn = C.uint32_t(friendNumber)
-
-	var cerr C.TOX_ERR_FRIEND_QUERY
-	C.tox_friend_get_typing(this.toxcore, _fn, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FRIEND_QUERY(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) SelfGetFriendListSize() uint32 {
-	r := C.tox_self_get_friend_list_size(this.toxcore)
-	return uint32(r)
-}
-
-func (this *Tox) SelfGetFriendList() []uint32 {
-	sz := C.tox_self_get_friend_list_size(this.toxcore)
-	vec := make([]uint32, sz)
-	if sz == 0 {
-		return vec
-	}
-	vec_p := unsafe.Pointer(&vec[0])
-	C.tox_self_get_friend_list(this.toxcore, (*C.uint32_t)(vec_p))
-	return vec
-}
-
-// tox_callback_***
-
-func (this *Tox) SelfGetNospam() uint32 {
-	r := C.tox_self_get_nospam(this.toxcore)
-	return uint32(r)
-}
-
-func (this *Tox) SelfSetNospam(nospam uint32) {
-	this.lock()
-	defer this.unlock()
-
-	var _nospam = C.uint32_t(nospam)
-	C.tox_self_set_nospam(this.toxcore, _nospam)
-}
-
-func (this *Tox) SelfGetPublicKey() *[PUBLIC_KEY_SIZE]byte {
-	var pubkey [PUBLIC_KEY_SIZE]byte
-	C.tox_self_get_public_key(this.toxcore, (*C.uint8_t)(&pubkey[0]))
-	return &pubkey
-}
-
-func (this *Tox) SelfGetSecretKey() *[SECRET_KEY_SIZE]byte {
-	var seckey [SECRET_KEY_SIZE]byte
-	C.tox_self_get_secret_key(this.toxcore, (*C.uint8_t)(&seckey[0]))
-	return &seckey
-}
-
-// tox_lossy_***
-
-func (this *Tox) FriendSendLossyPacket(friendNumber uint32, data []byte) error {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-	var _length = C.size_t(len(data))
-
-	var cerr C.TOX_ERR_FRIEND_CUSTOM_PACKET
-	C.tox_friend_send_lossy_packet(this.toxcore, _fn, (*C.uint8_t)(&data[0]), _length, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FRIEND_CUSTOM_PACKET(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) FriendSendLosslessPacket(friendNumber uint32, data []byte) error {
-	this.lock()
-	defer this.unlock()
-
-	var _fn = C.uint32_t(friendNumber)
-	var _length = C.size_t(len(data))
-
-	var cerr C.TOX_ERR_FRIEND_CUSTOM_PACKET
-	C.tox_friend_send_lossless_packet(this.toxcore, _fn, (*C.uint8_t)(&data[0]), _length, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FRIEND_CUSTOM_PACKET(cerr)
-	}
-	return nil
-}
-
-// tox_callback_avatar_**
-
-func (this *Tox) Hash(data []byte) []byte {
-	_hash := make([]byte, C.TOX_HASH_LENGTH)
-	var _datalen = C.size_t(len(data))
-	C.tox_hash((*C.uint8_t)(&_hash[0]), (*C.uint8_t)(&data[0]), _datalen)
-	return _hash
-}
-
-// tox_callback_file_***
-func (this *Tox) FileControl(friendNumber uint32, fileNumber uint32, control toxenums.TOX_FILE_CONTROL) error {
-	var cerr C.TOX_ERR_FILE_CONTROL
-	C.tox_file_control(this.toxcore, C.uint32_t(friendNumber), C.uint32_t(fileNumber), C.TOX_FILE_CONTROL(control), &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FILE_CONTROL(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) FileSend(friendNumber uint32, kind toxenums.TOX_FILE_KIND, fileSize uint64, fileId *[FILE_ID_LENGTH]byte, fileName []byte) (uint32, error) {
-	this.lock()
-	defer this.unlock()
-
-	var _fileID *C.uint8_t
-	if fileId != nil {
-		_fileID = (*C.uint8_t)(&fileId[0])
+	if opts.Savedata_type == toxenums.TOX_SAVEDATA_TYPE_SECRET_KEY {
+		t.SelfSetNospam_l(opts.NospamIfSecretType)
 	}
 
-	var cerr C.TOX_ERR_FILE_SEND
-	r := C.tox_file_send(this.toxcore, C.uint32_t(friendNumber), C.uint32_t(kind), C.uint64_t(fileSize),
-		_fileID, (*C.uint8_t)(&fileName[0]), C.size_t(len(fileName)), &cerr)
-	if cerr != 0 {
-		return uint32(r), toxenums.TOX_ERR_FILE_SEND(cerr)
+	C.tox_self_get_address(toxcore, (*C.uint8_t)(&t.Address[0]))
+	C.tox_self_get_public_key(toxcore, (*C.uint8_t)(&t.Pubkey[0]))
+	C.tox_self_get_secret_key(toxcore, (*C.uint8_t)(&t.Secret[0]))
+
+	size := C.tox_self_get_friend_list_size(toxcore)
+	if size != 0 {
+		list := make([]uint32, size)
+		C.tox_self_get_friend_list(t.toxcore, (*C.uint32_t)(&list[0]))
+		for _, friendNumber := range list {
+			var pubkey [PUBLIC_KEY_SIZE]byte
+			C.tox_friend_get_public_key(toxcore, C.uint32_t(friendNumber), (*C.uint8_t)(&pubkey[0]), nil)
+			t.onFriendAdded_l(friendNumber, &pubkey)
+		}
 	}
-	return uint32(r), nil
+
+	t.localAddr = addr(t.Pubkey[:])
+
+	cbUserDatas.set(toxcore, &t)
+	return &t, nil
 }
 
-func (this *Tox) FileSendChunk(friendNumber uint32, fileNumber uint32, position uint64, data []byte) error {
-	this.lock()
-	defer this.unlock()
-
-	if data == nil || len(data) == 0 {
-		return fmt.Errorf("empty data")
-	}
-	var cerr C.TOX_ERR_FILE_SEND_CHUNK
-	C.tox_file_send_chunk(this.toxcore, C.uint32_t(friendNumber), C.uint32_t(fileNumber),
-		C.uint64_t(position), (*C.uint8_t)(&data[0]), C.size_t(len(data)), &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FILE_SEND_CHUNK(cerr)
-	}
-	return nil
+// Kill only used before Run. If Run started, use StopAndKill.
+func (t *Tox) Kill() {
+	t.killOnce.Do(func() {
+		C.tox_kill(t.toxcore)
+		t.toxcore = nil
+		close(t.killed)
+	})
 }
 
-func (this *Tox) FileSeek(friendNumber uint32, fileNumber uint32, position uint64) error {
-	this.lock()
-	defer this.unlock()
-
-	var cerr C.TOX_ERR_FILE_SEEK
-	C.tox_file_seek(this.toxcore, C.uint32_t(friendNumber), C.uint32_t(fileNumber), C.uint64_t(position), &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_FILE_SEEK(cerr)
-	}
-	return nil
+// StopAndKill only used after Run. If Run not started, use Kill.
+func (t *Tox) StopAndKill() {
+	t.stopOnce.Do(func() { close(t.stop) })
+	<-t.stopped
 }
 
-func (this *Tox) FileGetFileId(friendNumber uint32, fileNumber uint32) (*[FILE_ID_LENGTH]byte, error) {
-	var cerr C.TOX_ERR_FILE_GET
-	var fileId_b [FILE_ID_LENGTH]byte
+// CallbackPostIterate heavey work must not be done here
 
-	C.tox_file_get_file_id(this.toxcore, C.uint32_t(fileNumber), C.uint32_t(fileNumber),
-		(*C.uint8_t)(&fileId_b[0]), &cerr)
-	if cerr != 0 {
-		return nil, toxenums.TOX_ERR_FILE_GET(cerr)
-	}
-	return &fileId_b, nil
+type CallbackPostIterateOnceFn func() time.Duration
+type CallbackTcpPongFn func(friendNumber uint32, ms uint32)
+
+// mainly used to delete friend from callbacks
+func (t *Tox) CallbackPostIterateOnce_l(cb CallbackPostIterateOnceFn) {
+	t.cbPostIterate = append(t.cbPostIterate, cb)
 }
-
-// boostrap, see upper
-func (this *Tox) AddTcpRelay(addr string, port uint16, pubkey *[PUBLIC_KEY_SIZE]byte) error {
-	this.lock()
-	defer this.unlock()
-
-	var _addr = C.CString(addr)
-	defer C.free(unsafe.Pointer(_addr))
-	var _port = C.uint16_t(port)
-	var _pubkey = (*C.uint8_t)(&pubkey[0])
-
-	var cerr C.TOX_ERR_BOOTSTRAP
-	C.tox_add_tcp_relay(this.toxcore, _addr, _port, _pubkey, &cerr)
-	if cerr != 0 {
-		return toxenums.TOX_ERR_BOOTSTRAP(cerr)
-	}
-	return nil
-}
-
-func (this *Tox) putcbevts(f func()) { this.cbevts = append(this.cbevts, f) }
-
-func (t *Tox) CTox() *C.Tox { return t.toxcore }
+func (t *Tox) CallbackTcpPong(cb CallbackTcpPongFn) { t.cbTcpPong = cb }

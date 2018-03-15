@@ -1,15 +1,12 @@
 package tox
 
 /*
-#include <stdlib.h>
-#include <string.h>
 #include <tox/tox.h>
-
 extern void toxCallbackLog(Tox*, TOX_LOG_LEVEL, char*, uint32_t, char*, char*);
-
 */
 import "C"
 import (
+	"time"
 	"unsafe"
 
 	"github.com/TokTok/go-toxcore-c/toxenums"
@@ -28,8 +25,15 @@ type ToxOptions struct {
 	Start_port              uint16
 	End_port                uint16
 	Hole_punching_enabled   bool
-	ThreadSafe              bool
-	LogCallback             func(_ *Tox, level toxenums.TOX_LOG_LEVEL, file string, line uint32, fname string, msg string)
+	LogCallback             func(t *Tox, level toxenums.TOX_LOG_LEVEL, file string, line uint32, fname string, msg string)
+
+	// additions
+	NospamIfSecretType      uint32
+	Decrypt                 func(ciphertext []byte) ([]byte, error)
+	ProxyToNoneIfErr        bool
+	AutoTcpPortIfErr        bool
+	DisableTcpPortIfAutoErr bool
+	PingUnit                time.Duration
 }
 
 func NewToxOptions() *ToxOptions {
@@ -84,10 +88,4 @@ func toxCallbackLog(ctox *C.Tox, level C.TOX_LOG_LEVEL, file *C.char, line C.uin
 	if t != nil && t.opts != nil && t.opts.LogCallback != nil {
 		t.opts.LogCallback(t, toxenums.TOX_LOG_LEVEL(level), C.GoString(file), uint32(line), C.GoString(fname), C.GoString(msg))
 	}
-}
-
-type BootNode struct {
-	Addr   string
-	Port   int
-	Pubkey string
 }

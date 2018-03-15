@@ -4,10 +4,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log"
-	"time"
 
 	"github.com/TokTok/go-toxcore-c"
 	"github.com/TokTok/go-toxcore-c/toxenums"
@@ -71,35 +69,24 @@ func main() {
 		log.Println(err)
 		return
 	}
-	fnums := t.SelfGetFriendList()
-	log.Println("Self Name:", t.SelfGetName())
-	log.Printf("Self ID: %X\n", t.SelfGetAddress()[:])
-	mystmsg := t.SelfGetStatusMessage()
+	flist := t.SelfGetFriendList()
+	log.Println("Self Name:", t.SelfGetName_l())
+	log.Printf("Self ID: %X\n", t.Address)
+	mystmsg := t.SelfGetStatusMessage_l()
 	log.Println("Status:", mystmsg)
 	log.Println("------------------------------------------")
-	log.Println("Friend Count:", len(fnums))
+	log.Println("Friend Count:", len(flist))
 
-	if len(fnums) > 0 {
-		log.Println("num\tname\tID\tseen\tstatus\tstmsg")
+	if len(flist) > 0 {
+		log.Println("num\tpublic_key")
 	}
-	for i := 0; i < len(fnums); i++ {
-		pubkey, err := t.FriendGetPublicKey(fnums[i])
-		tm, err := t.FriendGetLastOnline(fnums[i])
-		fname, err := t.FriendGetName(fnums[i])
-		stmsg, err := t.FriendGetStatusMessage(fnums[i])
-		status, err := t.FriendGetConnectionStatus(fnums[i])
-		if err != nil {
-			log.Println("wtf", i)
-		} else {
-			otm := time.Unix(int64(tm), 0)
-			log.Println(fmt.Sprintf("Friend %d: ", fnums[i]),
-				fname, fmt.Sprintf("%X", pubkey[:]), otm, status, stmsg)
-		}
+	for fn, pk := range flist {
+		log.Printf("%d\t%X\n", fn, pk[:])
 	}
-	if len(fnums) > 20 {
-		log.Println("Friend Count:", len(fnums))
+	if len(flist) > 20 {
+		log.Println("Friend Count:", len(flist))
 	}
-	if len(fnums) > 0 {
+	if len(flist) > 0 {
 		log.Println()
 	}
 }

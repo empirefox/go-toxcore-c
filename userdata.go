@@ -3,7 +3,6 @@
 package tox
 
 import (
-	"fmt"
 	"runtime"
 	"sync"
 )
@@ -37,8 +36,7 @@ func newUserData() *userData {
 
 func (this *userData) set(ctox *C.Tox, gtox *Tox) {
 	if this.cc {
-		key := this.obj2Str(ctox)
-		this.ud1.Store(key, gtox)
+		this.ud1.Store(ctox, gtox)
 	} else {
 		this.ud0[ctox] = gtox
 	}
@@ -46,8 +44,7 @@ func (this *userData) set(ctox *C.Tox, gtox *Tox) {
 
 func (this *userData) get(ctox *C.Tox) *Tox {
 	if this.cc {
-		key := this.obj2Str(ctox)
-		ival, ok := this.ud1.Load(key)
+		ival, ok := this.ud1.Load(ctox)
 		if !ok {
 			return nil
 		}
@@ -63,17 +60,12 @@ func (this *userData) get(ctox *C.Tox) *Tox {
 
 func (this *userData) del(ctox *C.Tox) {
 	if this.cc {
-		key := this.obj2Str(ctox)
-		this.ud1.Delete(key)
+		this.ud1.Delete(ctox)
 	} else {
 		if _, ok := this.ud0[ctox]; ok {
 			delete(this.ud0, ctox)
 		}
 	}
-}
-
-func (this *userData) obj2Str(ctox *C.Tox) string {
-	return fmt.Sprintf("%p", ctox)
 }
 
 type userDataAV struct {
@@ -99,8 +91,7 @@ func newUserDataAV() *userDataAV {
 
 func (this *userDataAV) set(ctox *C.ToxAV, gtox *ToxAV) {
 	if this.cc {
-		key := this.obj2Str(ctox)
-		this.ud1.Store(key, gtox)
+		this.ud1.Store(ctox, gtox)
 	} else {
 		this.ud0[ctox] = gtox
 	}
@@ -108,8 +99,7 @@ func (this *userDataAV) set(ctox *C.ToxAV, gtox *ToxAV) {
 
 func (this *userDataAV) get(ctox *C.ToxAV) *ToxAV {
 	if this.cc {
-		key := this.obj2Str(ctox)
-		ival, ok := this.ud1.Load(key)
+		ival, ok := this.ud1.Load(ctox)
 		if !ok {
 			return nil
 		}
@@ -125,15 +115,10 @@ func (this *userDataAV) get(ctox *C.ToxAV) *ToxAV {
 
 func (this *userDataAV) del(ctox *C.ToxAV) {
 	if this.cc {
-		key := this.obj2Str(ctox)
-		this.ud1.Delete(key)
+		this.ud1.Delete(ctox)
 	} else {
 		if _, ok := this.ud0[ctox]; ok {
 			delete(this.ud0, ctox)
 		}
 	}
-}
-
-func (this *userDataAV) obj2Str(ctox *C.ToxAV) string {
-	return fmt.Sprintf("%p", ctox)
 }

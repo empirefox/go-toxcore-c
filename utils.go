@@ -15,18 +15,6 @@ func safeptr(b []byte) unsafe.Pointer {
 	return unsafe.Pointer(h.Data)
 }
 
-var toxdebug = false
-
-func SetDebug(debug bool) {
-	toxdebug = debug
-}
-
-var loglevel = 0
-
-func SetLogLevel(level int) {
-	loglevel = level
-}
-
 func DecodeAddress(addr string) (*[ADDRESS_SIZE]byte, error) {
 	var addrb [ADDRESS_SIZE]byte
 	n, err := hex.Decode(addrb[:], bytes.ToLower([]byte(addr)))
@@ -37,6 +25,20 @@ func DecodeAddress(addr string) (*[ADDRESS_SIZE]byte, error) {
 		return nil, fmt.Errorf("Tox address bytes len should be %d, but got %d", ADDRESS_SIZE, n)
 	}
 	return &addrb, nil
+}
+
+func MustDecodeAddress(address string) *[ADDRESS_SIZE]byte {
+	addressb, err := DecodeAddress(address)
+	if err != nil {
+		panic(err)
+	}
+	return addressb
+}
+
+func ToPubkey(address *[ADDRESS_SIZE]byte) *[PUBLIC_KEY_SIZE]byte {
+	var pubkey [PUBLIC_KEY_SIZE]byte
+	copy(pubkey[:], address[:])
+	return &pubkey
 }
 
 func DecodePubkey(pubkey string) (*[PUBLIC_KEY_SIZE]byte, error) {
@@ -51,17 +53,21 @@ func DecodePubkey(pubkey string) (*[PUBLIC_KEY_SIZE]byte, error) {
 	return &pubkeyb, nil
 }
 
-func FileExist(fname string) bool {
-	_, err := os.Stat(fname)
-	if err != nil {
-		return false
-	}
-	return true
+func MustDecodePubkey(pubkey string) *[PUBLIC_KEY_SIZE]byte {
+	return MustDecodeSecret(pubkey)
 }
 
-func (this *Tox) WriteSavedata(fname string) error {
-	if !FileExist(fname) {
-		err := ioutil.WriteFile(fname, this.GetSavedata(), 0755)
+func MustDecodeSecret(secret string) *[SECRET_KEY_SIZE]byte {
+	b, err := DecodePubkey(secret)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func WriteSavedata(fname string, savedata []byte) error {
+	if _, err := os.Stat(fname); err != nil {
+		err = ioutil.WriteFile(fname, savedata, 0755)
 		if err != nil {
 			return err
 		}
@@ -70,22 +76,12 @@ func (this *Tox) WriteSavedata(fname string) error {
 		if err != nil {
 			return err
 		}
-		liveData := this.GetSavedata()
-		if bytes.Compare(data, liveData) != 0 {
-			err := ioutil.WriteFile(fname, this.GetSavedata(), 0755)
+		if bytes.Compare(data, savedata) != 0 {
+			err := ioutil.WriteFile(fname, savedata, 0755)
 			if err != nil {
 				return err
 			}
 		}
 	}
-
 	return nil
-}
-
-func (this *Tox) LoadSavedata(fname string) ([]byte, error) {
-	return ioutil.ReadFile(fname)
-}
-
-func LoadSavedata(fname string) ([]byte, error) {
-	return ioutil.ReadFile(fname)
 }
