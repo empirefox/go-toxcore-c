@@ -5,9 +5,9 @@ import (
 )
 
 func (t *Tox) ParseLosslessPacket(friendNumber uint32, data []byte) {
-	total := uint16(len(data))
-	if total < PROTOCOL_BUFFER_OFFSET {
-		log.Printf("Received too short data frame - only %d bytes, at least %d expected\n", total, PROTOCOL_BUFFER_OFFSET)
+	tf, ok := t.friends[friendNumber]
+	if !ok {
+		log.Printf("Got TCP frame with unknown friend ID #%d\n", t.recvFrom)
 		return
 	}
 
@@ -17,109 +17,157 @@ func (t *Tox) ParseLosslessPacket(friendNumber uint32, data []byte) {
 		return
 	}
 
-	size := (uint16(data[FrameDataSizeOffset]) << 8) | (uint16(data[FrameDataSizeOffset+1])) + PROTOCOL_BUFFER_OFFSET
-	if size != total {
-		log.Printf("Received frame size (attempted buffer overflow?): %d bytes, excepted %d bytes\n", total, size)
+	packetType := data[PacketTypeOffset]
+	if packetType >= PacketTypeInvalid {
+		log.Printf("Received data frame with invalid PacketType 0x%x\n", packetType)
 		return
 	}
 
-	if size > PROTOCOL_MAX_PACKET_SIZE {
-		log.Printf("Declared data length too big (attempted buffer overflow?): %d bytes, excepted at most %d bytes\n", size, PROTOCOL_MAX_PACKET_SIZE)
-		return
-	}
-
-	t.tcpFrame_l = TcpFrame{
-		FriendNumber: friendNumber,
-		Magic:        magic,
-		PacketType:   PacketType(data[FramePacketTypeOffset]),
-		ConnID:       data[FrameConnIdOffset],
-		Data:         data[PROTOCOL_BUFFER_OFFSET:],
-	}
-	if t.tcpFrame_l.PacketType >= PACKET_TYPE_INVALID {
-		log.Printf("Received data frame with invalid PacketType 0x%x\n", t.tcpFrame_l.PacketType)
-		return
-	}
+	t.recvFrame = data
+	t.recvFrom = friendNumber
+	t.recvFriend = tf
+	t.recvType = packetType
+	t.recvSize = uint16(len(data))
 
 	t.handle_frame()
 }
 
 // mostly imported from https://github.com/gjedeer/tuntox.git
 func (t *Tox) handle_frame() {
-	switch t.tcpFrame_l.PacketType {
-	case PACKET_TYPE_PING:
+	switch t.recvType {
+	case PacketTypeStreamBigServer:
+		t.handle_stream_data_frame(t.recvFriend.bigServer, t.recvFriend.FriendBig)
+	case PacketTypeStreamLittleServer:
+		t.handle_stream_data_frame(t.recvFriend.littleServer, !t.recvFriend.FriendBig)
+	case PacketTypeStreamOpen:
+		t.handle_stream_open_frame()
+	case PacketTypeStreamReady:
+		t.handle_stream_ready_frame()
+	case PacketTypeStreamClose:
+		t.handle_stream_close_frame()
+	case PacketTypePing:
 		t.handle_ping_frame()
-	case PACKET_TYPE_PONG:
+	case PacketTypePong:
 		t.handle_pong_frame()
-	case PACKET_TYPE_TCP:
-		t.handle_tcp_frame()
-	case PACKET_TYPE_REQUESTTUNNEL:
-		t.handle_request_tunnel_frame()
-	case PACKET_TYPE_ACKTUNNEL:
-		t.handle_acktunnel_frame()
-	case PACKET_TYPE_TCP_FIN:
-		t.handle_tcp_fin_frame()
 	default:
-		log.Printf("Got unknown tcp packet type 0x%x from friend %d\n", t.tcpFrame_l.PacketType, t.tcpFrame_l.FriendNumber)
+		log.Printf("Got unknown tcp packet type 0x%x from friend %d\n", t.recvType, t.recvFrom)
 	}
 }
 
-func (t *Tox) handle_tcp_frame() {
-	c, ok := t.validConnWithFrame()
-	if !ok {
+func (t *Tox) handle_stream_data_frame(stream *TcpStream, clientMode bool) {
+	if t.recvSize < PacketStreamDataOffset {
+		log.Printf("Declared data too small: %d bytes, excepted at least %d bytes\n", t.recvSize, PacketStreamDataOffset+1)
 		return
 	}
 
-	size := len(t.tcpFrame_l.Data)
+	if t.recvSize > TOX_MAX_CUSTOM_PACKET_SIZE {
+		log.Printf("Declared data too big (attempted buffer overflow?): %d bytes, excepted at most %d bytes\n", t.recvSize, TOX_MAX_CUSTOM_PACKET_SIZE)
+		return
+	}
+
+	size := (uint16(t.recvFrame[PacketStreamDataSizeOffset]) << 8) | (uint16(t.recvFrame[PacketStreamDataSizeOffset+1]))
+	if size+PacketStreamDataOffset != t.recvSize {
+		log.Printf("Received frame (attempted buffer overflow?): %d bytes, excepted %d bytes\n", size+PacketStreamDataOffset, t.recvSize)
+		return
+	}
+
+	if t.recvFriend.waitingAck && clientMode {
+		return
+	}
+
+	if stream == nil {
+		return
+	}
+
+	data := t.recvFrame[PacketStreamDataOffset:]
+	total := int(size)
 	sent := 0
-	for sent < size {
-		n, err := c.pipe.Write(t.tcpFrame_l.Data[sent:])
+	for sent < total {
+		n, err := stream.pipe.Write(data[sent:])
 		if err != nil {
-			log.Printf("Could not write to pipe of friend #%d: %v\n", c.frame.FriendNumber, err)
-			t.closeTcpTunnel_l(t.tcpFrame_l.FriendNumber)
+			stream.close_l()
+			log.Printf("Could not write to pipe of friend #%d: %v\n", t.recvFrom, err)
 			return
 		}
 		sent += n
 	}
 }
 
-func (t *Tox) handle_request_tunnel_frame() {
-	// close exist old conn
-	c, ok := t.tunnels_l[t.tcpFrame_l.FriendNumber]
-	if ok {
-		if t.tcpFrame_l.ConnID == c.frame.ConnID || !c.server {
-			return
-		}
-		// TODO really alow this?
-		t.closeTcpTunnel_l(t.tcpFrame_l.FriendNumber)
+func (t *Tox) handle_stream_open_frame() {
+	if t.recvSize != PacketStreamOpenReadySize {
+		log.Printf("Got invalid stream open frame")
+		return
 	}
 
-	// create server conn
+	tf := t.recvFriend
+	if tf.FriendBig {
+		if tf.littleServer != nil {
+			tf.littleServer.close_local_l()
+			tf.littleServer = nil
+		}
+	} else {
+		if tf.bigServer != nil {
+			tf.bigServer.close_local_l()
+			tf.bigServer = nil
+		}
+	}
+
 	t.tunnelAcceptMu.Lock()
+	defer t.tunnelAcceptMu.Unlock()
 	if t.tunnelAcceptClosed {
-		t.tunnelAcceptMu.Unlock()
-		t.finFrameNoData[FrameConnIdOffset] = t.tcpFrame_l.ConnID
-		data := sendTcpPacketData{
-			FriendNumber: c.frame.FriendNumber,
-			Data:         t.finFrameNoData[:],
+		return
+	}
+
+	t.bufStreamReadyFrameNoData[PacketStreamOpenReadySeqOffset] = t.recvFrame[PacketStreamOpenReadySeqOffset]
+	data := sendTcpPacketData{
+		FriendNumber: tf.FriendNumber,
+		Data:         t.bufStreamReadyFrameNoData[:],
+	}
+	t.sendTcpPacket_l(&data)
+	if data.err != 0 {
+		return
+	}
+
+	stream := tf.newTcpStream(true, !tf.FriendBig)
+	if tf.FriendBig {
+		tf.littleServer = stream
+	} else {
+		tf.bigServer = stream
+	}
+	t.tunnelAccept <- stream
+}
+
+func (t *Tox) handle_stream_ready_frame() {
+	if t.recvSize != PacketStreamOpenReadySize {
+		log.Printf("Got invalid stream ready frame")
+		return
+	}
+
+	tf := t.recvFriend
+	if tf.waitingAck && t.recvFrame[PacketStreamOpenReadySeqOffset] == tf.dialSeq {
+		tf.waitingAck = false
+	}
+}
+
+func (t *Tox) handle_stream_close_frame() {
+	if t.recvSize != PacketStreamCloseSize {
+		log.Printf("Got invalid stream close frame")
+		return
+	}
+
+	tf := t.recvFriend
+	switch t.recvFrame[PacketStreamCloseSize-1] {
+	case 0:
+		if tf.bigServer != nil {
+			tf.bigServer.remoteClosed = true
+			tf.bigServer.close_local_l()
+			tf.bigServer = nil
 		}
-		t.sendTcpPacket_l(&data)
-		return
+	case 1:
+		if tf.littleServer != nil {
+			tf.littleServer.remoteClosed = true
+			tf.littleServer.close_local_l()
+			tf.littleServer = nil
+		}
 	}
-	t.tunnelAccept <- t.newTcpConn(t.tcpFrame_l.FriendNumber, t.tcpFrame_l.ConnID, true)
-	t.tunnelAcceptMu.Unlock()
-
-	// TODO send_tunnel_ack_frame
-}
-
-func (t *Tox) handle_acktunnel_frame() {
-	log.Printf("ACK should not got here!")
-}
-
-func (t *Tox) handle_tcp_fin_frame() {
-	_, ok := t.validConnWithFrame()
-	if !ok {
-		return
-	}
-
-	t.closeTcpTunnel_l(t.tcpFrame_l.FriendNumber)
 }

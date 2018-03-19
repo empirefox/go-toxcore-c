@@ -1,103 +1,143 @@
 package tox
 
 import (
-	"encoding/hex"
+	"io"
 	"log"
 	"net"
 	"os"
-	"sync/atomic"
 	"time"
 )
 
-var ErrNoDeadline = os.ErrNoDeadline
+var (
+	ErrNoDeadline = os.ErrNoDeadline
+)
 
-type TcpConn struct {
-	t      *Tox
-	server bool
+type TcpStream struct {
+	tf        *ToxFriend
+	server    bool
+	big       bool
+	bigServer bool
+	closeTag  byte
 
-	// TODO try io.Pipe?
-	pipe       pipe
-	remoteAddr addr
-	buf        [PROTOCOL_MAX_PACKET_SIZE]byte
-	frame      TcpFrame
-	result     chan error
-	closed     atomic.Value
+	pipe pipe
+
+	buf [TOX_MAX_CUSTOM_PACKET_SIZE]byte
+
+	result       chan error
+	closed       bool
+	remoteClosed bool
 }
 
-func (t *Tox) newTcpConn(friendNumber uint32, connid byte, server bool) *TcpConn {
-	c := TcpConn{
-		t:      t,
-		server: server,
-		pipe:   pipe{b: new(dataBuffer)},
-		frame: TcpFrame{
-			FriendNumber: friendNumber,
-			Magic:        PROTOCOL_MAGIC,
-			PacketType:   PACKET_TYPE_TCP,
-			ConnID:       connid,
-		},
-		result: make(chan error, 1),
+func (tf *ToxFriend) newTcpStream(server, big bool) *TcpStream {
+	bigServer := server && big || !server && !big
+	var closeTag byte = 1
+	packetType := PacketTypeStreamLittleServer
+	if bigServer {
+		closeTag = 0
+		packetType = PacketTypeStreamBigServer
 	}
-	c.frame.WriteProtocol(c.buf[:])
-	pubkey, ok := t.FriendGetPublicKey(friendNumber)
-	if ok {
-		c.remoteAddr = addr(hex.EncodeToString(pubkey[:]))
-	} else {
-		c.remoteAddr = addr("unknown remote pubkey")
+	c := TcpStream{
+		tf:        tf,
+		server:    server,
+		big:       big,
+		bigServer: bigServer,
+		closeTag:  closeTag,
+		pipe:      pipe{b: new(dataBuffer)},
+		buf:       [TOX_MAX_CUSTOM_PACKET_SIZE]byte{PROTOCOL_MAGIC_HIGH, PROTOCOL_MAGIC_LOW, packetType},
+		result:    make(chan error, 1),
 	}
-	c.closed.Store(false)
 
-	t.tunnels_l[friendNumber] = &c
 	return &c
 }
 
-func (c *TcpConn) Close() error {
-	if c.closed.Load().(bool) {
-		return nil
-	}
-	result := make(chan error, 1)
-	c.t.DoInLoop(&CloseTcpTunnelData{
-		FriendNumber: c.frame.FriendNumber,
-		Result:       result,
+func (c *TcpStream) Close() (err error) {
+	done := make(chan struct{}, 1)
+	c.tf.tox.DoInLoop(func() {
+		err = c.close_l()
+		close(done)
 	})
-	return <-result
+	<-done
+	return
+}
+
+func (c *TcpStream) close_l() (err error) {
+	if err = c.close_local_l(); err != nil {
+		return
+	}
+	t := c.tf.tox
+	if !c.remoteClosed {
+		t.bufStreamCloseFrameNoData[PacketStreamCloseSize-1] = c.closeTag
+		data := sendTcpPacketData{
+			FriendNumber: c.tf.FriendNumber,
+			Data:         t.bufStreamCloseFrameNoData[:],
+		}
+		t.sendTcpPacket_l(&data)
+		if data.err != 0 {
+			err = data.err
+		}
+	}
+	return
+}
+
+func (c *TcpStream) close_local_l() error {
+	if c.closed {
+		return io.EOF
+	}
+	c.closed = true
+	c.pipe.CloseWithError(io.EOF)
+	if c.bigServer {
+		c.tf.bigServer = nil
+	} else {
+		c.tf.littleServer = nil
+	}
+	if !c.server {
+		c.tf.unlockDial()
+	}
+	return nil
 }
 
 // Write write directly to underline implement
-func (c *TcpConn) Write(p []byte) (n int, err error) {
-	for {
-		dataSize := copy(c.buf[PROTOCOL_BUFFER_OFFSET:], p[n:])
-		c.buf[FrameDataSizeOffset] = byte(dataSize >> 8)
-		c.buf[FrameDataSizeOffset+1] = byte(dataSize)
-		c.t.DoInLoop(&sendTcpPacketData{
-			FriendNumber: c.frame.FriendNumber,
-			Data:         c.buf[:PROTOCOL_BUFFER_OFFSET+dataSize],
-			Result:       c.result,
+func (c *TcpStream) Write(p []byte) (n int, err error) {
+	total := len(p)
+	for n < total {
+		dataSize := copy(c.buf[PacketStreamDataOffset:], p[n:])
+		c.buf[PacketStreamDataSizeOffset] = byte(dataSize >> 8)
+		c.buf[PacketStreamDataSizeOffset+1] = byte(dataSize)
+		c.tf.tox.DoInLoop(func() {
+			if c.closed {
+				c.result <- io.EOF
+				return
+			}
+
+			data := sendTcpPacketData{
+				FriendNumber: c.tf.FriendNumber,
+				Data:         c.buf[:PacketStreamDataOffset+dataSize],
+				Result:       c.result,
+			}
+			c.tf.tox.sendTcpPacket_l(&data)
 		})
 		err = <-c.result
 		if err != nil {
 			return
 		}
 		n += dataSize
-		if dataSize < READ_BUFFER_SIZE {
-			return
-		}
 	}
 	return
 }
 
-func (c *TcpConn) Read(p []byte) (n int, err error) { return c.pipe.Read(p) }
-func (c *TcpConn) LocalAddr() net.Addr              { return &c.t.localAddr }
-func (c *TcpConn) RemoteAddr() net.Addr             { return &c.remoteAddr }
+func (c *TcpStream) Read(p []byte) (n int, err error) { return c.pipe.Read(p) }
+func (c *TcpStream) LocalAddr() net.Addr              { return &c.tf.tox.localAddr }
+func (c *TcpStream) RemoteAddr() net.Addr             { return &c.tf.remoteAddr }
 
-func (c *TcpConn) SetDeadline(t time.Time) error {
+func (c *TcpStream) SetDeadline(t time.Time) error {
 	log.Println("SetDeadline should not be called")
 	return ErrNoDeadline
 }
-func (c *TcpConn) SetReadDeadline(t time.Time) error {
+func (c *TcpStream) SetReadDeadline(t time.Time) error {
 	log.Println("SetReadDeadline should not be called")
 	return ErrNoDeadline
 }
-func (c *TcpConn) SetWriteDeadline(t time.Time) error {
+func (c *TcpStream) SetWriteDeadline(t time.Time) error {
 	log.Println("SetWriteDeadline should not be called")
 	return ErrNoDeadline
 }

@@ -3,19 +3,42 @@ package tox
 //#include <tox/tox.h>
 import "C"
 import (
+	"bytes"
+	"encoding/hex"
+	"strings"
+
 	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
 func (t *Tox) onFriendAdded_l(friendNumber uint32, pubkey *[PUBLIC_KEY_SIZE]byte) {
 	t.friendIdToPk.Store(friendNumber, pubkey)
 	t.friendPkToId.Store(*pubkey, friendNumber)
+
+	friendBig := bytes.Compare(pubkey[:], t.Pubkey[:]) == 1
+	var dialSeq byte = 1
+	if friendBig {
+		dialSeq = 0
+	}
 	pingValue := defaultPinMapValue
-	t.pingMap_l[friendNumber] = &pingValue
+	tf := ToxFriend{
+		FriendNumber: friendNumber,
+		Pubkey:       *pubkey,
+		FriendBig:    friendBig,
+
+		tox:        t,
+		dialSeq:    dialSeq,
+		remoteAddr: addr(strings.ToUpper(hex.EncodeToString(pubkey[:]))),
+		ping:       &pingValue,
+	}
+	t.friends[friendNumber] = &tf
 }
 
 func (t *Tox) onFriendDeleted_l(friendNumber uint32) {
-	t.closeTcpTunnel_l(friendNumber)
-	delete(t.pingMap_l, friendNumber)
+	tf, ok := t.friends[friendNumber]
+	if ok {
+		tf.CloseStreams_l()
+		delete(t.friends, friendNumber)
+	}
 
 	pubkey, ok := t.friendPkToId.Load(friendNumber)
 	if ok {

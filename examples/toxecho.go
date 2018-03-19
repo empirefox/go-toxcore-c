@@ -148,7 +148,7 @@ func main() {
 		if debug {
 			log.Println("on self conn status:", status)
 		}
-		if !*serverMode {
+		if status != toxenums.TOX_CONNECTION_NONE && !*serverMode {
 			_, err := t.FriendAdd_l(serverAddress, []byte("Hi! I am a tunnel client."))
 			if err != nil {
 				log.Println("FriendAdd_l", err)

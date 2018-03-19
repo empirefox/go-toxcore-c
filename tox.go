@@ -57,24 +57,24 @@ type Tox struct {
 	cbTcpPong     CallbackTcpPongFn
 	cbPostIterate []CallbackPostIterateOnceFn
 
-	pingFrameNoData          [PacketPingSize]byte
-	pongFrameNoData          [PacketPingSize]byte
-	tunnelRequestFrameNoData [PROTOCOL_BUFFER_OFFSET]byte
-	finFrameNoData           [PROTOCOL_BUFFER_OFFSET]byte
+	bufPingFrameNoData        [PacketPingPongSize]byte
+	bufPongFrameNoData        [PacketPingPongSize]byte
+	bufStreamOpenFrameNoData  [PacketStreamOpenReadySize]byte
+	bufStreamReadyFrameNoData [PacketStreamOpenReadySize]byte
+	bufStreamCloseFrameNoData [PacketStreamCloseSize]byte
 
-	// this is buf of recv frame
-	tcpFrame_l TcpFrame
+	recvFrame  []byte
+	recvFrom   uint32
+	recvFriend *ToxFriend
+	recvType   byte
+	recvSize   uint16
 
 	localAddr addr
 	pingUnit  time.Duration
-	pingMap_l map[uint32]*[3]int8 // count, trigger, pings_from_last_pong
 
-	// TODO split to 2 map, add tag to protocol header,
-	// we can support both client/server mode with the same peer.
-	tunnels_l   map[uint32]*TcpConn
-	tunnelids_l map[uint32]byte
+	friends map[uint32]*ToxFriend
 
-	tunnelAccept       chan *TcpConn
+	tunnelAccept       chan *TcpStream
 	tunnelAcceptMu     sync.Mutex
 	tunnelAcceptClosed bool
 
@@ -154,17 +154,17 @@ func NewTox(opts *ToxOptions) (*Tox, error) {
 		opts:    opts,
 		toxcore: toxcore,
 
-		pingFrameNoData:          pingFrameNoData,
-		pongFrameNoData:          pongFrameNoData,
-		tunnelRequestFrameNoData: tunnelRequestFrameNoData,
-		finFrameNoData:           finFrameNoData,
+		bufPingFrameNoData:        pingFrameNoData,
+		bufPongFrameNoData:        pongFrameNoData,
+		bufStreamOpenFrameNoData:  streamOpenFrameNoData,
+		bufStreamReadyFrameNoData: streamReadyFrameNoData,
+		bufStreamCloseFrameNoData: streamCloseFrameNoData,
 
-		pingUnit:    opts.PingUnit,
-		pingMap_l:   make(map[uint32]*[3]int8),
-		tunnels_l:   make(map[uint32]*TcpConn),
-		tunnelids_l: make(map[uint32]byte),
+		pingUnit: opts.PingUnit,
 
-		tunnelAccept: make(chan *TcpConn, 16),
+		friends: make(map[uint32]*ToxFriend),
+
+		tunnelAccept: make(chan *TcpStream, 16),
 
 		chLoopRequest: make(chan interface{}, 1024),
 		stop:          make(chan struct{}),
@@ -200,6 +200,7 @@ func NewTox(opts *ToxOptions) (*Tox, error) {
 // Kill only used before Run. If Run started, use StopAndKill.
 func (t *Tox) Kill() {
 	t.killOnce.Do(func() {
+		t.close()
 		C.tox_kill(t.toxcore)
 		t.toxcore = nil
 		close(t.killed)
@@ -210,6 +211,10 @@ func (t *Tox) Kill() {
 func (t *Tox) StopAndKill() {
 	t.stopOnce.Do(func() { close(t.stop) })
 	<-t.stopped
+}
+
+func (t *Tox) Iterate_l() {
+	C.tox_iterate(t.toxcore, nil)
 }
 
 // CallbackPostIterate heavey work must not be done here

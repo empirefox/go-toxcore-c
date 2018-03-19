@@ -2,48 +2,51 @@ package tox
 
 import (
 	"encoding/binary"
+	"log"
 	"math"
 	"time"
 
 	"github.com/TokTok/go-toxcore-c/toxenums"
 )
 
-func (t *Tox) setPingMultiple_l(data *pingMultipleData) {
-	_, ok := t.pingMap_l[data.FriendNumber]
+func (t *Tox) SetPingMultiple_l(friendNumber uint32, multiple int8) error {
+	tf, ok := t.friends[friendNumber]
 	if !ok {
-		data.Result <- toxenums.TOX_ERR_FRIEND_QUERY_FRIEND_NOT_FOUND
-		return
+		return toxenums.TOX_ERR_FRIEND_QUERY_FRIEND_NOT_FOUND
 	}
 
-	if data.Multiple == 0 {
-		t.pingMap_l[data.FriendNumber][1] = DefaultPingMultiple
+	if multiple == 0 {
+		tf.ping[1] = DefaultPingMultiple
 	} else {
-		t.pingMap_l[data.FriendNumber][1] = data.Multiple
+		tf.ping[1] = multiple
 	}
-	data.Result <- nil
-	return
+	return nil
+}
+
+func (t *Tox) setPingMultiple_l(data *PingMultipleData) {
+	data.Result <- t.SetPingMultiple_l(data.FriendNumber, data.Multiple)
 }
 
 // TODO refactor: move ping to TcpConn?
 func (t *Tox) doTcpPing_l() {
 	ms := uint32(time.Now().UnixNano() / int64(time.Millisecond))
-	binary.BigEndian.PutUint32(t.pingFrameNoData[PROTOCOL_BUFFER_OFFSET:], ms)
+	binary.BigEndian.PutUint32(t.bufPingFrameNoData[PacketPingPongTimeOffset:], ms)
 
-	for fn, ns := range t.pingMap_l {
+	for fn, tf := range t.friends {
+		ns := tf.ping
 		if ns[1] < 0 {
 			continue
 		}
 
 		if ns[0] == 0 {
 			if ns[2] > PingMaxTryTimes {
-				// close timeout
-				t.closeTcpTunnel_l(fn)
+				tf.CloseStreams_l()
 				continue
 			}
 
 			data := sendTcpPacketData{
 				FriendNumber: fn,
-				Data:         t.pingFrameNoData[:],
+				Data:         t.bufPingFrameNoData[:],
 				NoRetry:      true,
 			}
 			t.sendTcpPacket_l(&data)
@@ -51,8 +54,7 @@ func (t *Tox) doTcpPing_l() {
 
 			// if err, check timeout now
 			if data.err != 0 && ns[2] > PingMaxTryTimes {
-				// close timeout
-				t.closeTcpTunnel_l(fn)
+				tf.CloseStreams_l()
 				continue
 			}
 		}
@@ -65,38 +67,32 @@ func (t *Tox) doTcpPing_l() {
 }
 
 func (t *Tox) handle_ping_frame() {
-	_, ok := t.validConnWithFrame()
-	if !ok {
+	if t.recvSize != PacketPingPongSize {
+		log.Printf("Got invalid ping frame")
 		return
 	}
-	if len(t.tcpFrame_l.Data) != PingPongTimestampSize {
-		return
-	}
-	copy(t.pongFrameNoData[PROTOCOL_BUFFER_OFFSET:], t.tcpFrame_l.Data)
+
+	copy(t.bufPongFrameNoData[PacketPingPongTimeOffset:], t.recvFrame[PacketPingPongTimeOffset:])
 	t.sendTcpPacket_l(&sendTcpPacketData{
-		FriendNumber: t.tcpFrame_l.FriendNumber,
-		Data:         t.pongFrameNoData[:],
+		FriendNumber: t.recvFrom,
+		Data:         t.bufPongFrameNoData[:],
 	})
 }
 
 func (t *Tox) handle_pong_frame() {
-	c, ok := t.validConnWithFrame()
-	if !ok {
+	if t.recvSize != PacketPingPongSize {
+		log.Printf("Got invalid pong frame")
 		return
 	}
 
-	if len(t.tcpFrame_l.Data) != PingPongTimestampSize {
-		return
-	}
-
-	t.pingMap_l[c.frame.FriendNumber][2] = 0 // pings_from_last_pong
+	t.recvFriend.ping[2] = 0 // pings_from_last_pong
 
 	if t.cbTcpPong != nil {
 		ms := int32(time.Now().UnixNano() / int64(time.Millisecond))
-		ms -= int32(binary.BigEndian.Uint32(t.tcpFrame_l.Data))
+		ms -= int32(binary.BigEndian.Uint32(t.recvFrame[PacketPingPongTimeOffset:]))
 		if ms < 0 {
 			ms += math.MaxInt32
 		}
-		t.cbTcpPong(t.tcpFrame_l.FriendNumber, uint32(ms))
+		t.cbTcpPong(t.recvFrom, uint32(ms))
 	}
 }

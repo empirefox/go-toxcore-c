@@ -55,12 +55,6 @@ func (t *Tox) Run() {
 
 func (t *Tox) doInLoop(idata interface{}) {
 	switch data := idata.(type) {
-	case *CreateTcpTunnelData:
-		t.createTcpTunnel_l(data)
-	case *CreateTcpTunnelByPublicKeyData:
-		t.createTcpTunnelByPublicKey_l(data)
-	case *CloseTcpTunnelData:
-		t.CloseTcpTunnel_l(data)
 	case *sendTcpPacketData:
 		t.sendTcpPacket_l(data)
 
@@ -159,7 +153,7 @@ func (t *Tox) doInLoop(idata interface{}) {
 	case *ConferenceGetTypeData:
 		t.conferenceGetType_l(data)
 
-	case *pingMultipleData:
+	case *PingMultipleData:
 		t.setPingMultiple_l(data)
 
 	case IterateThenData:
