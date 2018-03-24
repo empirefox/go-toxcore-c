@@ -197,7 +197,7 @@ func NewTox(opts *ToxOptions) (*Tox, error) {
 	return &t, nil
 }
 
-// Kill only used before Run. If Run started, use StopAndKill.
+// Kill only used when not running.
 func (t *Tox) Kill() {
 	t.killOnce.Do(func() {
 		t.close()
@@ -207,8 +207,7 @@ func (t *Tox) Kill() {
 	})
 }
 
-// StopAndKill only used after Run. If Run not started, use Kill.
-func (t *Tox) StopAndKill() {
+func (t *Tox) Stop() {
 	t.stopOnce.Do(func() { close(t.stop) })
 	<-t.stopped
 }

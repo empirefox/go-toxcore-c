@@ -42,15 +42,19 @@ func ToPubkey(address *[ADDRESS_SIZE]byte) *[PUBLIC_KEY_SIZE]byte {
 }
 
 func DecodePubkey(pubkey string) (*[PUBLIC_KEY_SIZE]byte, error) {
-	var pubkeyb [PUBLIC_KEY_SIZE]byte
-	n, err := hex.Decode(pubkeyb[:], bytes.ToLower([]byte(pubkey)))
+	return DecodeSecret(pubkey)
+}
+
+func DecodeSecret(secret string) (*[SECRET_KEY_SIZE]byte, error) {
+	var secretb [SECRET_KEY_SIZE]byte
+	n, err := hex.Decode(secretb[:], bytes.ToLower([]byte(secret)))
 	if err != nil {
 		return nil, err
 	}
-	if n != PUBLIC_KEY_SIZE {
-		return nil, fmt.Errorf("Tox public key bytes len should be %d, but got %d", PUBLIC_KEY_SIZE, n)
+	if n != SECRET_KEY_SIZE {
+		return nil, fmt.Errorf("Tox key bytes len should be %d, but got %d", SECRET_KEY_SIZE, n)
 	}
-	return &pubkeyb, nil
+	return &secretb, nil
 }
 
 func MustDecodePubkey(pubkey string) *[PUBLIC_KEY_SIZE]byte {

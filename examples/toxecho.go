@@ -336,7 +336,8 @@ func main() {
 		}
 
 		av.Kill()
-		t.StopAndKill()
+		t.Stop()
+		t.Kill()
 	}()
 
 	// toxcore loops

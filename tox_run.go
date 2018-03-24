@@ -46,7 +46,6 @@ func (t *Tox) Run() {
 			t.doTcpPing_l()
 
 		case <-t.stop:
-			t.Kill()
 			close(t.stopped)
 			return
 		}
