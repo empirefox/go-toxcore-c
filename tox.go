@@ -14,6 +14,8 @@ import (
 
 // Tox method end with _l should be used inside of callbacks or before Run() called.
 // All xxx_l can do the same with DoInLoop((*)xxxData{}) out side of callbacks.
+// Dial_l should be used by http2.
+// TODO refactor api and add doc.
 type Tox struct {
 	opts    *ToxOptions
 	toxcore *C.Tox

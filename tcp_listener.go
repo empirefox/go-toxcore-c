@@ -40,6 +40,7 @@ func (t *Tox) Addr() net.Addr { return &t.localAddr }
 
 // Dial_l dail from callbacks and it will not auto retry. It will not block the
 // queue. If failed, save the pubkey then try Dial out side of callbacks later.
+// Usage see https://github.com/empirefox/hybrid/blob/master/hybridtox/dc_tox.go#L118
 func (t *Tox) Dial_l(friendNumber uint32) (net.Conn, error) {
 	tf, ok := t.friends[friendNumber]
 	if !ok {
