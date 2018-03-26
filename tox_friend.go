@@ -39,6 +39,8 @@ func (tf *ToxFriend) SyncDail() (c *TcpStream, err error) {
 	return
 }
 
+// SyncDail_l each friend can dail each other, but limited to one pair living conns.
+// It is useful with http2. We can http2 to any ToxFriend.
 func (tf *ToxFriend) SyncDail_l() (c *TcpStream, err error) {
 	if err = tf.lockDial(); err != nil {
 		return
@@ -47,14 +49,10 @@ func (tf *ToxFriend) SyncDail_l() (c *TcpStream, err error) {
 	t := tf.tox
 	tf.dialSeq += 2
 	t.bufStreamOpenFrameNoData[PacketStreamOpenReadySeqOffset] = tf.dialSeq
-	data := sendTcpPacketData{
-		FriendNumber: tf.FriendNumber,
-		Data:         t.bufStreamOpenFrameNoData[:],
-	}
-	t.sendTcpPacket_l(&data)
-	if data.err != 0 {
+	e := t.FriendSendLosslessPacket_l(tf.FriendNumber, t.bufStreamOpenFrameNoData[:], false)
+	if e != 0 {
 		tf.unlockDial()
-		err = data.err
+		err = e
 		return
 	}
 

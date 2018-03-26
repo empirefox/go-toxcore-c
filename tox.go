@@ -12,10 +12,8 @@ import (
 	"github.com/phayes/freeport"
 )
 
-// Tox method end with _l should be used inside of callbacks or before Run() called.
-// All xxx_l can do the same with DoInLoop((*)xxxData{}) out side of callbacks.
-// Dial_l should be used by http2.
-// TODO refactor api and add doc.
+// Tox method end with _l should be called inside of callbacks or DoInLoop(func(){ t.xxx_l }).
+// TODO refactor api and add doc. Dial_l should be used by http2.
 type Tox struct {
 	opts    *ToxOptions
 	toxcore *C.Tox
@@ -80,7 +78,7 @@ type Tox struct {
 	tunnelAcceptMu     sync.Mutex
 	tunnelAcceptClosed bool
 
-	chLoopRequest chan interface{}
+	chLoopRequest chan func()
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -168,7 +166,7 @@ func NewTox(opts *ToxOptions) (*Tox, error) {
 
 		tunnelAccept: make(chan *TcpStream, 16),
 
-		chLoopRequest: make(chan interface{}, 1024),
+		chLoopRequest: make(chan func(), 1024),
 		stop:          make(chan struct{}),
 		stopped:       make(chan struct{}),
 		killed:        make(chan struct{}),
@@ -223,7 +221,7 @@ func (t *Tox) Iterate_l() {
 type CallbackPostIterateOnceFn func() time.Duration
 type CallbackTcpPongFn func(friendNumber uint32, ms uint32)
 
-// mainly used to delete friend from callbacks
+// CallbackPostIterateOnce_l mainly used to delete friend from callbacks
 func (t *Tox) CallbackPostIterateOnce_l(cb CallbackPostIterateOnceFn) {
 	t.cbPostIterate = append(t.cbPostIterate, cb)
 }

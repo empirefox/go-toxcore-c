@@ -17,6 +17,8 @@ func (t *Tox) Accept() (net.Conn, error) {
 	return nil, os.ErrClosed
 }
 
+// Close Close implememts net.Listener and will do nothing. Kill tox will close the
+// listener.
 func (t *Tox) Close() error {
 	return errors.New("Close tox listener will do nothing, kill tox please")
 }

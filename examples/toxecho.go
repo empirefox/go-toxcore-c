@@ -208,7 +208,7 @@ func main() {
 			log.Printf("on recv file control: %d %d %v %X %v\n", friendNumber, fileNumber, control, friendId, err)
 		}
 		// worker's job now.
-		workerCh <- &tox.FileControlData{
+		workerCh <- &FileControlData{
 			FriendNumber: friendNumber,
 			FileNumber:   fileNumber,
 			Control:      control,
@@ -224,9 +224,9 @@ func main() {
 			// good guy
 		}
 		// worker's job now.
-		toWorkerData := make(chan *tox.FileSendResult, 1)
-		toWorkerData <- &tox.FileSendResult{FileNumber: fileNumber}
-		workerCh <- &tox.FileSendData{
+		toWorkerData := make(chan *FileSendResult, 1)
+		toWorkerData <- &FileSendResult{FileNumber: fileNumber}
+		workerCh <- &FileSendData{
 			FriendNumber: friendNumber,
 			Kind:         kind,
 			FileSize:     fileSize,
@@ -244,7 +244,7 @@ func main() {
 			return
 		}
 		// worker's job now.
-		workerCh <- &tox.FileSendChunkData{
+		workerCh <- &FileSendChunkData{
 			FriendNumber: friendNumber,
 			FileNumber:   fileNumber,
 			Position:     position,
@@ -374,15 +374,11 @@ func main() {
 			if err != nil {
 			}
 			if data, ok := sendDatas[reqkey]; ok {
-				req := &tox.FileSendChunkData{
-					FriendNumber: friendNumber,
-					FileNumber:   fileNumber,
-					Position:     pos,
-					Data:         data,
-					Result:       make(chan error, 1),
-				}
-				t.DoInLoop(req)
-				if err = <-req.Result; err != nil {
+				errCh := make(chan error, 1)
+				t.DoInLoop(func() {
+					errCh <- t.FileSendChunk_l(friendNumber, fileNumber, pos, data)
+				})
+				if err = <-errCh; err != nil {
 					if terr, ok := err.(toxenums.TOX_ERR_FILE_SEND_CHUNK); ok && terr > 6 {
 					} else {
 						log.Println("file send chunk error:", err, reqkey)
@@ -408,11 +404,17 @@ func main() {
 		select {
 		case idata := <-workerCh:
 			switch data := idata.(type) {
-			case *tox.FileSendData:
+			case *FileSendData:
 				result := <-data.Result
 				fileNumber := result.FileNumber
 
-				t.DoInLoop(data)
+				t.DoInLoop(func() {
+					fileNumber, err := t.FileSend_l(data.FriendNumber, data.Kind, data.FileSize, data.FileId, data.FileName)
+					data.Result <- &FileSendResult{
+						FileNumber: fileNumber,
+						Error:      err,
+					}
+				})
 				result = <-data.Result
 				if result.Error != nil {
 					log.Println("RE file:", data.FileName, result.Error)
@@ -422,7 +424,7 @@ func main() {
 				recvFiles[uint64(data.FriendNumber)<<32|uint64(fileNumber)] = result.FileNumber
 				sendFiles[uint64(data.FriendNumber)<<32|uint64(result.FileNumber)] = fileNumber
 
-			case *tox.FileControlData:
+			case *FileControlData:
 				key := uint64(data.FriendNumber)<<32 | uint64(data.FileNumber)
 				fno, ok := sendFiles[key]
 				if !ok {
@@ -430,12 +432,14 @@ func main() {
 					continue
 				}
 				data.FileNumber = fno
-				t.DoInLoop(data)
+				t.DoInLoop(func() {
+					data.Result <- t.FileControl_l(data.FriendNumber, data.FileNumber, data.Control)
+				})
 				if err := <-data.Result; err != nil {
 					log.Println("RE control:", data.FileNumber, err)
 				}
 
-			case *tox.FileSendChunkData:
+			case *FileSendChunkData:
 				reFileNumber := recvFiles[uint64(data.FriendNumber)<<32|uint64(data.FileNumber)]
 				key := makekey(data.FriendNumber, reFileNumber, data.Position)
 				sendDatas[key] = data.Data
@@ -458,8 +462,8 @@ func main() {
 
 		case liveData := <-workerSavedata:
 			if liveData == nil {
-				data := make(tox.GetSavedataData, 1)
-				t.DoInLoop(data)
+				data := make(chan []byte, 1)
+				t.DoInLoop(func() { data <- t.GetSavedata_l() })
 				liveData = <-data
 			}
 			err = tox.WriteSavedata(fname, liveData)
@@ -468,6 +472,32 @@ func main() {
 			}
 		}
 	}
+}
+
+type FileControlData struct {
+	FriendNumber uint32
+	FileNumber   uint32
+	Control      toxenums.TOX_FILE_CONTROL
+	Result       chan error
+}
+type FileSendData struct {
+	FriendNumber uint32
+	Kind         toxenums.TOX_FILE_KIND
+	FileSize     uint64
+	FileId       *[tox.FILE_ID_LENGTH]byte
+	FileName     []byte
+	Result       chan *FileSendResult
+}
+type FileSendResult struct {
+	FileNumber uint32
+	Error      error
+}
+type FileSendChunkData struct {
+	FriendNumber uint32
+	FileNumber   uint32
+	Position     uint64
+	Data         []byte
+	Result       chan error
 }
 
 type FileChunkRequestData struct {
@@ -485,7 +515,7 @@ func onClientConn(c net.Conn) {
 		for {
 			_, err := c.Read(buf)
 			if err != nil {
-				log.Println("client reade done")
+				log.Printf("client reade done: %v", err)
 				return
 			}
 			log.Println("\nserver:", string(buf))
@@ -501,7 +531,7 @@ func onClientConn(c net.Conn) {
 		log.Println("\nclient:", msg, len(msg))
 		_, err := c.Write([]byte(msg))
 		if err != nil {
-			log.Println("client write done")
+			log.Printf("client write done: %v", err)
 			return
 		}
 		time.Sleep(time.Second * 2)

@@ -23,10 +23,6 @@ func (t *Tox) SetPingMultiple_l(friendNumber uint32, multiple int8) error {
 	return nil
 }
 
-func (t *Tox) setPingMultiple_l(data *PingMultipleData) {
-	data.Result <- t.SetPingMultiple_l(data.FriendNumber, data.Multiple)
-}
-
 // TODO refactor: move ping to TcpConn?
 func (t *Tox) doTcpPing_l() {
 	ms := uint32(time.Now().UnixNano() / int64(time.Millisecond))
@@ -44,16 +40,11 @@ func (t *Tox) doTcpPing_l() {
 				continue
 			}
 
-			data := sendTcpPacketData{
-				FriendNumber: fn,
-				Data:         t.bufPingFrameNoData[:],
-				NoRetry:      true,
-			}
-			t.sendTcpPacket_l(&data)
+			e := t.FriendSendLosslessPacket_l(fn, t.bufPingFrameNoData[:], true)
 			ns[2]++ // pings_from_last_pong
 
 			// if err, check timeout now
-			if data.err != 0 && ns[2] > PingMaxTryTimes {
+			if e != 0 && ns[2] > PingMaxTryTimes {
 				tf.CloseStreams_l()
 				continue
 			}
@@ -73,10 +64,7 @@ func (t *Tox) handle_ping_frame() {
 	}
 
 	copy(t.bufPongFrameNoData[PacketPingPongTimeOffset:], t.recvFrame[PacketPingPongTimeOffset:])
-	t.sendTcpPacket_l(&sendTcpPacketData{
-		FriendNumber: t.recvFrom,
-		Data:         t.bufPongFrameNoData[:],
-	})
+	t.FriendSendLosslessPacket_l(t.recvFrom, t.bufPongFrameNoData[:], false)
 }
 
 func (t *Tox) handle_pong_frame() {

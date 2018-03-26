@@ -82,22 +82,17 @@ func (t *Tox) CallbackConferencePeerListChanged(cbfn cb_conference_peer_list_cha
 
 // methods tox_conference_*
 
-func (t *Tox) conferenceNew_l(data ConferenceNewData) {
-	var err error
+func (t *Tox) ConferenceNew_l() (conferenceNumber uint32, err error) {
 	var cerr C.TOX_ERR_CONFERENCE_NEW
 	r := C.tox_conference_new(t.toxcore, &cerr)
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_NEW(cerr)
 	}
-
-	data <- &ConferenceNewResult{
-		ConferenceNumber: uint32(r),
-		Error:            err,
-	}
+	return uint32(r), err
 }
 
-func (t *Tox) conferenceDelete_l(data *ConferenceDeleteData) {
-	cn := C.uint32_t(data.ConferenceNumber)
+func (t *Tox) ConferenceDelete_l(conferenceNumber uint32) error {
+	cn := C.uint32_t(conferenceNumber)
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_DELETE
@@ -105,36 +100,31 @@ func (t *Tox) conferenceDelete_l(data *ConferenceDeleteData) {
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_DELETE(cerr)
 	}
-
-	data.Result <- err
+	return err
 }
 
-func (t *Tox) conferencePeerGetName_l(data *ConferencePeerGetNameData) {
-	cn := C.uint32_t(data.ConferenceNumber)
-	pn := C.uint32_t(data.PeerNumber)
+func (t *Tox) ConferencePeerGetName_l(conferenceNumber, peerNumber uint32) (string, error) {
+	cn := C.uint32_t(conferenceNumber)
+	pn := C.uint32_t(peerNumber)
 
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
 	size := C.tox_conference_peer_get_name_size(t.toxcore, cn, pn, &cerr)
 	if cerr != 0 {
-		data.Result <- &ConferencePeerGetNameResult{Error: toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)}
-		return
+		return "", toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
 
 	name := make([]byte, size)
 	C.tox_conference_peer_get_name(t.toxcore, cn, pn, (*C.uint8_t)(&name[0]), &cerr)
 	if cerr != 0 {
-		data.Result <- &ConferencePeerGetNameResult{Error: toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)}
-		return
+		return "", toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
 
-	data.Result <- &ConferencePeerGetNameResult{
-		Name: string(name),
-	}
+	return string(name), nil
 }
 
-func (t *Tox) conferencePeerGetPublicKey_l(data *ConferencePeerGetPublicKeyData) {
-	cn := C.uint32_t(data.ConferenceNumber)
-	pn := C.uint32_t(data.PeerNumber)
+func (t *Tox) ConferencePeerGetPublicKey_l(conferenceNumber, peerNumber uint32) (*[PUBLIC_KEY_SIZE]byte, error) {
+	cn := C.uint32_t(conferenceNumber)
+	pn := C.uint32_t(peerNumber)
 
 	var pubkey [PUBLIC_KEY_SIZE]byte
 	var err error
@@ -143,25 +133,20 @@ func (t *Tox) conferencePeerGetPublicKey_l(data *ConferencePeerGetPublicKeyData)
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
-
-	data.Result <- &ConferencePeerGetPublicKeyResult{
-		Pubkey: &pubkey,
-		Error:  err,
-	}
+	return &pubkey, err
 }
 
-func (t *Tox) conferenceInvite_l(data *ConferenceInviteData) {
+func (t *Tox) ConferenceInvite_l(conferenceNumber, friendNumber uint32) error {
 	// if give a friendNumber which not exists,
 	// the tox_invite_friend has a strange behaive: cause other tox_* call failed
 	// and the call will return true, but only strange thing accurs
 	// so just precheck the friendNumber and then go
-	if !t.FriendExists(data.FriendNumber) {
-		data.Result <- toxenums.TOX_ERR_FRIEND_QUERY_FRIEND_NOT_FOUND
-		return
+	if !t.FriendExists(friendNumber) {
+		return toxenums.TOX_ERR_FRIEND_QUERY_FRIEND_NOT_FOUND
 	}
 
-	cn := C.uint32_t(data.ConferenceNumber)
-	fn := C.uint32_t(data.FriendNumber)
+	cn := C.uint32_t(conferenceNumber)
+	fn := C.uint32_t(friendNumber)
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_INVITE
@@ -169,91 +154,81 @@ func (t *Tox) conferenceInvite_l(data *ConferenceInviteData) {
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_INVITE(cerr)
 	}
-	data.Result <- err
+	return err
 }
 
-func (t *Tox) conferenceJoin_l(data *ConferenceJoinData) {
-	if data.Cookie == nil {
-		data.Result <- &ConferenceJoinResult{Error: toxenums.TOX_ERR_CONFERENCE_JOIN_INVALID_LENGTH}
-		return
+func (t *Tox) ConferenceJoin_l(friendNumber uint32, cookie []byte) (uint32, error) {
+	if cookie == nil {
+		return 0, toxenums.TOX_ERR_CONFERENCE_JOIN_INVALID_LENGTH
 	}
 
-	fn := C.uint32_t(data.FriendNumber)
+	fn := C.uint32_t(friendNumber)
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_JOIN
-	r := C.tox_conference_join(t.toxcore, fn, (*C.uint8_t)(&data.Cookie[0]), C.size_t(len(data.Cookie)), &cerr)
+	r := C.tox_conference_join(t.toxcore, fn, (*C.uint8_t)(&cookie[0]), C.size_t(len(cookie)), &cerr)
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_JOIN(cerr)
 	}
-
-	data.Result <- &ConferenceJoinResult{
-		ConferenceNumber: uint32(r),
-		Error:            err,
-	}
+	return uint32(r), err
 }
 
-func (t *Tox) conferenceSendMessage_l(data *ConferenceSendMessageData) {
-	switch data.Type {
+func (t *Tox) ConferenceSendMessage_l(conferenceNumber uint32, typ toxenums.TOX_MESSAGE_TYPE, message []byte) error {
+	switch typ {
 	case toxenums.TOX_MESSAGE_TYPE_NORMAL:
 	case toxenums.TOX_MESSAGE_TYPE_ACTION:
 	default:
-		data.Result <- fmt.Errorf("Invalid tox conference message type: %v", data.Type)
-		return
+		return fmt.Errorf("Invalid tox conference message type: %v", typ)
 	}
 
-	cn := C.uint32_t(data.ConferenceNumber)
-	message := (*C.uint8_t)(&data.Message[0])
-	message_size := C.size_t(len(data.Message))
+	cn := C.uint32_t(conferenceNumber)
+	cmessage := (*C.uint8_t)(&message[0])
+	cmessage_size := C.size_t(len(message))
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_SEND_MESSAGE
-	C.tox_conference_send_message(t.toxcore, cn, C.TOX_MESSAGE_TYPE(data.Type), message, message_size, &cerr)
+	C.tox_conference_send_message(t.toxcore, cn, C.TOX_MESSAGE_TYPE(typ), cmessage, cmessage_size, &cerr)
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_SEND_MESSAGE(cerr)
 	}
-
-	data.Result <- err
+	return err
 }
 
-func (t *Tox) conferenceSetTitle_l(data *ConferenceSetTitleData) {
-	cn := C.uint32_t(data.ConferenceNumber)
-	title := []byte(data.Title)
-	title_size := C.size_t(len(title))
+func (t *Tox) ConferenceSetTitle_l(conferenceNumber uint32, title string) error {
+	cn := C.uint32_t(conferenceNumber)
+	ctitle := []byte(title)
+	ctitle_size := C.size_t(len(ctitle))
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_TITLE
-	C.tox_conference_set_title(t.toxcore, cn, (*C.uint8_t)(&title[0]), title_size, &cerr)
+	C.tox_conference_set_title(t.toxcore, cn, (*C.uint8_t)(&ctitle[0]), ctitle_size, &cerr)
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)
 	}
-
-	data.Result <- err
+	return err
 }
 
-func (t *Tox) conferenceGetTitle_l(data *ConferenceGetTitleData) {
-	cn := C.uint32_t(data.ConferenceNumber)
+func (t *Tox) ConferenceGetTitle_l(conferenceNumber uint32) (string, error) {
+	cn := C.uint32_t(conferenceNumber)
 
 	var cerr C.TOX_ERR_CONFERENCE_TITLE
 	size := C.tox_conference_get_title_size(t.toxcore, cn, &cerr)
 	if cerr != 0 {
-		data.Result <- &ConferenceGetTitleResult{Error: toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)}
-		return
+		return "", toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)
 	}
 
 	title := make([]byte, size)
 	C.tox_conference_get_title(t.toxcore, cn, (*C.uint8_t)(&title[0]), &cerr)
 	if cerr != 0 {
-		data.Result <- &ConferenceGetTitleResult{Error: toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)}
-		return
+		return "", toxenums.TOX_ERR_CONFERENCE_TITLE(cerr)
 	}
 
-	data.Result <- &ConferenceGetTitleResult{Title: string(title)}
+	return string(title), nil
 }
 
-func (t *Tox) conferencePeerNumberIsOurs_l(data *ConferencePeerNumberIsOursData) {
-	cn := C.uint32_t(data.ConferenceNumber)
-	pn := C.uint32_t(data.PeerNumber)
+func (t *Tox) ConferencePeerNumberIsOurs_l(conferenceNumber, peerNumber uint32) (bool, error) {
+	cn := C.uint32_t(conferenceNumber)
+	pn := C.uint32_t(peerNumber)
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
@@ -261,15 +236,11 @@ func (t *Tox) conferencePeerNumberIsOurs_l(data *ConferencePeerNumberIsOursData)
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
-
-	data.Result <- &ConferencePeerNumberIsOursResult{
-		Is:    bool(r),
-		Error: err,
-	}
+	return bool(r), err
 }
 
-func (t *Tox) conferencePeerCount_l(data *ConferencePeerCountData) {
-	cn := C.uint32_t(data.ConferenceNumber)
+func (t *Tox) ConferencePeerCount_l(conferenceNumber uint32) (uint32, error) {
+	cn := C.uint32_t(conferenceNumber)
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_PEER_QUERY
@@ -277,27 +248,22 @@ func (t *Tox) conferencePeerCount_l(data *ConferencePeerCountData) {
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_PEER_QUERY(cerr)
 	}
-
-	data.Result <- &ConferencePeerCountResult{
-		Count: uint32(r),
-		Error: err,
-	}
+	return uint32(r), err
 }
 
-func (t *Tox) conferenceGetChatlist_l(data ConferenceGetChatlistData) {
+func (t *Tox) ConferenceGetChatlist_l() []uint32 {
 	size := C.tox_conference_get_chatlist_size(t.toxcore)
 	if size == 0 {
-		data <- nil
-		return
+		return nil
 	}
 
 	list := make([]uint32, size)
 	C.tox_conference_get_chatlist(t.toxcore, (*C.uint32_t)(unsafe.Pointer(&list[0])))
-	data <- list
+	return list
 }
 
-func (t *Tox) conferenceGetType_l(data *ConferenceGetTypeData) {
-	cn := C.uint32_t(data.ConferenceNumber)
+func (t *Tox) ConferenceGetType_l(conferenceNumber uint32) (toxenums.TOX_CONFERENCE_TYPE, error) {
+	cn := C.uint32_t(conferenceNumber)
 
 	var err error
 	var cerr C.TOX_ERR_CONFERENCE_GET_TYPE
@@ -305,9 +271,5 @@ func (t *Tox) conferenceGetType_l(data *ConferenceGetTypeData) {
 	if cerr != 0 {
 		err = toxenums.TOX_ERR_CONFERENCE_GET_TYPE(cerr)
 	}
-
-	data.Result <- &ConferenceGetTypeResult{
-		Type:  toxenums.TOX_CONFERENCE_TYPE(r),
-		Error: err,
-	}
+	return toxenums.TOX_CONFERENCE_TYPE(r), err
 }

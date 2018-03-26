@@ -119,12 +119,8 @@ func (t *Tox) handle_stream_open_frame() {
 	}
 
 	t.bufStreamReadyFrameNoData[PacketStreamOpenReadySeqOffset] = t.recvFrame[PacketStreamOpenReadySeqOffset]
-	data := sendTcpPacketData{
-		FriendNumber: tf.FriendNumber,
-		Data:         t.bufStreamReadyFrameNoData[:],
-	}
-	t.sendTcpPacket_l(&data)
-	if data.err != 0 {
+	e := t.FriendSendLosslessPacket_l(tf.FriendNumber, t.bufStreamReadyFrameNoData[:], false)
+	if e != 0 {
 		return
 	}
 

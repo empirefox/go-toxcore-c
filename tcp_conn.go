@@ -67,13 +67,9 @@ func (c *TcpStream) close_l() (err error) {
 	t := c.tf.tox
 	if !c.remoteClosed {
 		t.bufStreamCloseFrameNoData[PacketStreamCloseSize-1] = c.closeTag
-		data := sendTcpPacketData{
-			FriendNumber: c.tf.FriendNumber,
-			Data:         t.bufStreamCloseFrameNoData[:],
-		}
-		t.sendTcpPacket_l(&data)
-		if data.err != 0 {
-			err = data.err
+		e := t.FriendSendLosslessPacket_l(c.tf.FriendNumber, t.bufStreamCloseFrameNoData[:], false)
+		if e != 0 {
+			err = e
 		}
 	}
 	return
@@ -108,13 +104,12 @@ func (c *TcpStream) Write(p []byte) (n int, err error) {
 				c.result <- io.EOF
 				return
 			}
-
-			data := sendTcpPacketData{
-				FriendNumber: c.tf.FriendNumber,
-				Data:         c.buf[:PacketStreamDataOffset+dataSize],
-				Result:       c.result,
+			e := c.tf.tox.FriendSendLosslessPacket_l(c.tf.FriendNumber, c.buf[:PacketStreamDataOffset+dataSize], false)
+			if e != 0 {
+				c.result <- e
+			} else {
+				c.result <- nil
 			}
-			c.tf.tox.sendTcpPacket_l(&data)
 		})
 		err = <-c.result
 		if err != nil {
