@@ -246,14 +246,8 @@ func (this *ToxAV) CallbackVideoReceiveFrame(cbfn cb_video_receive_frame_ftype) 
 }
 
 // TODO
-// toxav_add_av_groupchat
 // toxav_join_av_groupchat
 // toxav_group_send_audio
-
-func (this *Tox) AddAVGroupChat() int {
-	r := C.toxav_add_av_groupchat(this.toxcore, nil, nil)
-	return int(r)
-}
 
 func (this *Tox) JoinAVGroupChat(friendNumber uint32, cookie []byte) (int, error) {
 	var _fn = C.uint32_t(friendNumber)
